@@ -220,6 +220,9 @@ fn play_vidro() {
     let mut buf = String::new();
     let command_re = Regex::new(r"(set|flick)\s+(\d+)\/(\d+)(?:\s+(\d))?").unwrap();
 
+    let set_re_ = Regex::new(r"s\s+(\d+)\s+(\d+)").unwrap();
+    let flick_re = Regex::new(r"f\s+(\d+)\s+(\d+)\s+(\d)").unwrap();
+
     let mut read_buf = String::new();
 
     loop {
