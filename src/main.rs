@@ -239,7 +239,6 @@ fn play_vidro() {
             for j in 0..vidro.board[0].len() {
                 buf += "\u{001b}[";
                 buf += &(30 + vidro.board[i][j]).to_string();
-                buf += &(vidro.board[i][j].to_string());
                 buf += if vidro.board[i][j] == 0 {
                     r"m  "
                 } else {
