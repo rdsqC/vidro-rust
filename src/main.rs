@@ -50,8 +50,6 @@ impl Vidro {
                 return Ok(());
             }
         } else {
-            self.steps += 1;
-            return Ok(());
             return Err("もう置く石がありません");
         }
     }
