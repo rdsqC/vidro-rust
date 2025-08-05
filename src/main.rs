@@ -258,7 +258,7 @@ fn play_vidro() {
             buf += "\n";
         }
 
-        buf += " 3 2 1\n 4 ● 5\n 5 6 7\n";
+        buf += " 3 2 1\n 4 ● 0\n 5 6 7\n";
         buf += "steps: ";
         buf += &vidro.steps.to_string();
         buf += "\n input> ";
@@ -275,7 +275,7 @@ fn play_vidro() {
                         caps[2].parse::<usize>().unwrap(),
                         caps[3].parse::<usize>().unwrap(),
                     );
-                    let angle = caps[3].parse::<usize>();
+                    let angle = caps[4].parse::<usize>();
 
                     match &caps[1] {
                         "set" => match vidro.set_ohajiki(coord) {
