@@ -75,10 +75,17 @@ impl Vidro {
         coord: (usize, usize),
         angle: (isize, isize),
     ) -> Result<(), &'static str> {
+        let now_turn_player = self.steps % (self.num_player as usize);
+        let ohajiki_num: u8 = (now_turn_player + 1).try_into().unwrap();
+
         let now_board = self.board.clone();
 
         let mut target = self.board[coord.0][coord.1];
         let mut target_coord: (isize, isize) = (coord.0 as isize, coord.1 as isize);
+
+        if target != ohajiki_num {
+            return Err("他人の駒をはじくことはできません");
+        }
 
         let mut next: (isize, isize); //default 処理中での移動先の座標を示す。
 
@@ -118,8 +125,27 @@ impl Vidro {
             //なにも駒がうごかないはじきは禁止
             return Err("その手はできません");
         } else {
+            //駒が動かないはじきを禁止
+            {
+                let mut is_all = true;
+                for i in 0..self.board.len() {
+                    for j in 0..self.board[0].len() {
+                        if self.board[i][j] != now_board[i][j] {
+                            is_all = false;
+                            break;
+                        }
+                    }
+                    if !is_all {
+                        break;
+                    }
+                }
+                if is_all {
+                    return Err("駒が動かないはじきはできません");
+                }
+            }
+
+            //千日手の防止
             for i in 0..self.board.len() {
-                //千日手の防止
                 for j in 0..self.board[0].len() {
                     if self.board[i][j] != self.prev_board[i][j] {
                         self.steps += 1;
