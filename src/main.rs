@@ -287,8 +287,10 @@ fn play_vidro() {
                         "flick" => {
                             match angle {
                                 Ok(angle) => {
-                                    match vidro.flick_ohajiki(coord, ANGLES[angle % (8 as usize)]) {
-                                        Ok(()) => (), //成功
+                                    match vidro.flick_ohajiki(coord, ANGLES[angle]) {
+                                        Ok(()) => {
+                                            println!("{:?}", ANGLES[angle])
+                                        } //成功
                                         Err(err) => {
                                             println!("{}", err);
                                             read_buf.clear();
