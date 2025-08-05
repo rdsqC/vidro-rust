@@ -62,6 +62,7 @@ impl Vidro {
             } else {
                 self.board[coord.0][coord.1] = ohajiki_num;
                 self.players_has_piece[now_turn_player] -= 1;
+                self.steps += 1;
                 println!("{:?}", &self.board);
                 return Ok(());
             }
