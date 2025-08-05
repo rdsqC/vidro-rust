@@ -40,11 +40,19 @@ impl Vidro {
         false
     }
     pub fn set_ohajiki(&mut self, coord: (usize, usize)) -> Result<(), &'static str> {
-        if self.is_there_surrounding_piece(self.steps.try_into().unwrap(), coord) {
-            return Err("周りに既に石があります");
+        let now_turn_player = self.steps % (self.num_player as usize);
+        if 0 < self.players_has_piece[now_turn_player] {
+            if self.is_there_surrounding_piece(now_turn_player.try_into().unwrap(), coord) {
+                return Err("周りに既に石があります");
+            } else {
+                self.steps += 1;
+                self.players_has_piece[now_turn_player] = 1;
+                return Ok(());
+            }
         } else {
             self.steps += 1;
             return Ok(());
+            return Err("もう置く石がありません");
         }
     }
     pub fn flick_ohajiki(
