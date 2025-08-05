@@ -176,4 +176,122 @@ impl Vidro {
     }
 }
 
-fn main() {}
+fn read_buffer() -> String {
+    let mut buffer = String::new();
+    io::stdin()
+        .read_line(&mut buffer)
+        .expect("Failed to read line.");
+    buffer.trim().to_string()
+}
+
+const COLOR_RESET: &str = "\u{001b}[0m";
+
+fn play_vidro() {
+    let mut vidro = Vidro::new(2);
+    let mut buf = String::new();
+    let command_re = Regex::new(r"(set|flick)\s+(\d+)\/(\d+)(?:\s+(\d))?").unwrap();
+
+    let mut read_buf = String::new();
+
+    loop {
+        buf.clear();
+
+        //盤面作成
+        buf += "now turn player: ";
+        buf += &(vidro.steps % (vidro.num_player as usize)).to_string();
+        buf += "\n";
+
+        buf += "\u{001b}[47m  0 1 2 3 4\u{001b}[0m\n";
+        for i in 0..vidro.board.len() {
+            buf += "\u{001b}[47m";
+            buf += &i.to_string();
+            buf += "\u{001b}[0m";
+
+            for j in 0..vidro.board[0].len() {
+                buf += "\u{001b}[";
+                buf += &(30 + vidro.board[i][j]).to_string();
+                buf += &(vidro.board[i][j].to_string());
+                buf += if vidro.board[i][j] == 0 {
+                    r"m  "
+                } else {
+                    r"m● "
+                };
+                buf += COLOR_RESET;
+            }
+            buf += "\n";
+        }
+
+        for i in 0..vidro.num_player {
+            buf += "player";
+            buf += &i.to_string();
+            buf += ": ";
+            buf += &vidro.players_has_piece[i as usize].to_string();
+            buf += "\n";
+        }
+
+        buf += " 3 2 1\n 4 ● 5\n 5 6 7\n";
+        buf += "steps: ";
+        buf += &vidro.steps.to_string();
+        buf += "\n input> ";
+
+        println!("{}", buf);
+
+        read_buf.clear();
+        while read_buf.is_empty() {
+            read_buf = read_buffer();
+
+            match command_re.captures(&read_buf) {
+                Some(caps) => {
+                    let coord = (
+                        caps[2].parse::<usize>().unwrap(),
+                        caps[3].parse::<usize>().unwrap(),
+                    );
+                    let angle = caps[3].parse::<usize>();
+
+                    match &caps[1] {
+                        "set" => match vidro.set_ohajiki(coord) {
+                            Ok(()) => (), //成功
+                            Err(err) => {
+                                println!("{}", err);
+                                read_buf.clear();
+                            }
+                        },
+                        "flick" => {
+                            match angle {
+                                Ok(angle) => {
+                                    match vidro.flick_ohajiki(coord, ANGLES[angle % (8 as usize)]) {
+                                        Ok(()) => (), //成功
+                                        Err(err) => {
+                                            println!("{}", err);
+                                            read_buf.clear();
+                                        }
+                                    }
+                                }
+                                Err(_) => {
+                                    println!("方向を入力してください");
+                                    read_buf.clear();
+                                }
+                            }
+                        }
+                        &_ => {
+                            println!(
+                                "コマンドの読み取りに失敗しました。\ncommands:\n    set y/x\n    flick y/x angle"
+                            );
+                            read_buf.clear();
+                        }
+                    }
+                }
+                None => {
+                    println!(
+                        "コマンドの読み取りに失敗しました。\ncommands:\n    set y/x\n    flick y/x angle"
+                    );
+                    read_buf.clear();
+                }
+            }
+        }
+    }
+}
+
+fn main() {
+    play_vidro();
+}
