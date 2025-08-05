@@ -29,10 +29,20 @@ impl Vidro {
             players_has_piece: vec![5; num_player],
         }
     }
-    pub fn is_there_surrounding_piece(&self, player_num: u8, coord: (usize, usize)) -> bool {
+    pub fn is_there_surrounding_piece(&self, ohajiki_num: u8, coord: (usize, usize)) -> bool {
         for i in 0..3 {
             for j in 0..3 {
-                if self.board[coord.0 + i][coord.1 + j] == player_num {
+                if coord.0 as isize + i - 1 < 0
+                    || self.board.len() as isize <= coord.0 as isize + i - 1
+                    || coord.1 as isize + j - 1 < 0
+                    || self.board[0].len() as isize <= coord.1 as isize + j - 1
+                {
+                    continue;
+                }
+                if self.board[(coord.0 as isize + i) as usize - 1]
+                    [(coord.1 as isize + j) as usize - 1]
+                    == ohajiki_num
+                {
                     return true;
                 }
             }
@@ -40,13 +50,17 @@ impl Vidro {
         false
     }
     pub fn set_ohajiki(&mut self, coord: (usize, usize)) -> Result<(), &'static str> {
+        //プレイヤーについている数字+1をそのプレイヤーの石として設計している。
         let now_turn_player = self.steps % (self.num_player as usize);
+        let ohajiki_num = (now_turn_player + 1).try_into().unwrap();
+
         if 0 < self.players_has_piece[now_turn_player] {
-            if self.is_there_surrounding_piece(now_turn_player.try_into().unwrap(), coord) {
+            if self.is_there_surrounding_piece(ohajiki_num, coord) {
                 return Err("周りに既に石があります");
             } else {
-                self.steps += 1;
-                self.players_has_piece[now_turn_player] = 1;
+                self.board[coord.0][coord.1] = ohajiki_num;
+                self.players_has_piece[now_turn_player] -= 1;
+                println!("{:?}", &self.board);
                 return Ok(());
             }
         } else {
