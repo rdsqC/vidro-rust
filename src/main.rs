@@ -1,6 +1,6 @@
 use Vec;
 use regex::Regex;
-use std::{io, ptr::read};
+use std::io;
 
 const ANGLES: [(isize, isize); 8] = [
     (0, 1),
@@ -63,7 +63,6 @@ impl Vidro {
                 self.board[coord.0][coord.1] = ohajiki_num;
                 self.players_has_piece[now_turn_player] -= 1;
                 self.steps += 1;
-                println!("{:?}", &self.board);
                 return Ok(());
             }
         } else {
@@ -263,7 +262,6 @@ fn play_vidro() {
         buf += " 3 2 1\n 4 ● 0\n 5 6 7\n";
         buf += "steps: ";
         buf += &vidro.steps.to_string();
-        buf += "\n input> ";
 
         println!("{}", buf);
 
@@ -300,7 +298,6 @@ fn play_vidro() {
                     if angle < 8 {
                         match vidro.flick_ohajiki(coord, ANGLES[angle]) {
                             Ok(()) => {
-                                println!("{:?}", ANGLES);
                                 break;
                             } //成功
                             Err(err) => {
