@@ -372,7 +372,6 @@ impl Node {
         self.eval = None;
     }
     fn search(&mut self) -> () {
-        println!("深さ {}", self.max_deep);
         if 0 < self.max_deep {
             let mut new_board;
 
@@ -386,7 +385,7 @@ impl Node {
                         }
                         Err(_) => (),
                     }
-                    for k in 0..7 {
+                    for k in 0..8 {
                         new_board = self.board.clone();
                         match new_board.flick_ohajiki((i, j), ANGLES[k]) {
                             Ok(_) => {
