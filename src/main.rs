@@ -1,6 +1,6 @@
 use Vec;
 use regex::Regex;
-use std::io;
+use std::{io, ptr::read};
 
 const ANGLES: [(isize, isize); 8] = [
     (0, 1),
@@ -116,6 +116,7 @@ impl Vidro {
                     _ => {
                         //移動先に駒がある場合
                         target_coord = next;
+                        target = self.board[u_next.0][u_next.1];
                     }
                 }
             }
@@ -218,9 +219,8 @@ const COLOR_RESET: &str = "\u{001b}[0m";
 fn play_vidro() {
     let mut vidro = Vidro::new(2);
     let mut buf = String::new();
-    let command_re = Regex::new(r"(set|flick)\s+(\d+)\/(\d+)(?:\s+(\d))?").unwrap();
 
-    let set_re_ = Regex::new(r"s\s+(\d+)\s+(\d+)").unwrap();
+    let set_re = Regex::new(r"s\s+(\d+)\s+(\d+)").unwrap();
     let flick_re = Regex::new(r"f\s+(\d+)\s+(\d+)\s+(\d)").unwrap();
 
     let mut read_buf = String::new();
@@ -268,59 +268,53 @@ fn play_vidro() {
         println!("{}", buf);
 
         read_buf.clear();
-        while read_buf.is_empty() {
+        loop {
             read_buf = read_buffer();
 
-            match command_re.captures(&read_buf) {
+            match set_re.captures(&read_buf) {
                 Some(caps) => {
                     let coord = (
+                        caps[1].parse::<usize>().unwrap(),
                         caps[2].parse::<usize>().unwrap(),
-                        caps[3].parse::<usize>().unwrap(),
                     );
-                    let angle = caps[4].parse::<usize>();
 
-                    match &caps[1] {
-                        "set" => match vidro.set_ohajiki(coord) {
-                            Ok(()) => (), //成功
-                            Err(err) => {
-                                println!("{}", err);
-                                read_buf.clear();
-                            }
-                        },
-                        "flick" => {
-                            match angle {
-                                Ok(angle) => {
-                                    match vidro.flick_ohajiki(coord, ANGLES[angle]) {
-                                        Ok(()) => {
-                                            println!("{:?}", ANGLES[angle])
-                                        } //成功
-                                        Err(err) => {
-                                            println!("{}", err);
-                                            read_buf.clear();
-                                        }
-                                    }
-                                }
-                                Err(_) => {
-                                    println!("方向を入力してください");
-                                    read_buf.clear();
-                                }
-                            }
-                        }
-                        &_ => {
-                            println!(
-                                "コマンドの読み取りに失敗しました。\ncommands:\n    set y/x\n    flick y/x angle"
-                            );
-                            read_buf.clear();
+                    match vidro.set_ohajiki(coord) {
+                        Ok(()) => {
+                            break;
+                        } //成功
+                        Err(err) => {
+                            println!("{}", err);
+                            continue;
                         }
                     }
                 }
-                None => {
-                    println!(
-                        "コマンドの読み取りに失敗しました。\ncommands:\n    set y/x\n    flick y/x angle"
-                    );
-                    read_buf.clear();
-                }
+                None => (),
             }
+            match flick_re.captures(&read_buf) {
+                Some(caps) => {
+                    let coord = (
+                        caps[1].parse::<usize>().unwrap(),
+                        caps[2].parse::<usize>().unwrap(),
+                    );
+                    let angle = caps[3].parse::<usize>().unwrap();
+                    if angle < 8 {
+                        match vidro.flick_ohajiki(coord, ANGLES[angle]) {
+                            Ok(()) => {
+                                println!("{:?}", ANGLES);
+                                break;
+                            } //成功
+                            Err(err) => {
+                                println!("{}", err);
+                                continue;
+                            }
+                        }
+                    }
+                }
+                None => (),
+            }
+            println!(
+                "コマンドの読み取りに失敗しました。\ncommands:\n    set y/x\n    flick y/x angle"
+            );
         }
     }
 }
