@@ -173,30 +173,34 @@ impl Vidro {
                     if self.board[i][j] == self.board[i + 1][j]
                         && self.board[i + 1][j] == self.board[i + 2][j]
                     {
-                        result[self.board[i][j] as usize] = true;
-                        continue;
+                        if 0 < self.board[i][j] as usize {
+                            result[self.board[i][j] as usize - 1] = true;
+                        }
                     }
                 }
                 if j < l2 - 2 {
                     if self.board[i][j] == self.board[i][j + 1]
                         && self.board[i][j + 1] == self.board[i][j + 2]
                     {
-                        result[self.board[i][j] as usize] = true;
-                        continue;
+                        if 0 < self.board[i][j] as usize {
+                            result[self.board[i][j] as usize - 1] = true;
+                        }
                     }
                 }
                 if i < l1 - 2 && j < l2 - 2 {
                     if self.board[i][j] == self.board[i + 1][j + 1]
                         && self.board[i + 1][j + 1] == self.board[i + 2][j + 2]
                     {
-                        result[self.board[i][j] as usize] = true;
-                        continue;
+                        if 0 < self.board[i][j] as usize {
+                            result[self.board[i][j] as usize - 1] = true;
+                        }
                     }
                     if self.board[i][j + 2] == self.board[i + 1][j + 1]
                         && self.board[i + 1][j + 1] == self.board[i + 2][j]
                     {
-                        result[self.board[i][j] as usize] = true;
-                        continue;
+                        if 0 < self.board[i][j + 2] as usize {
+                            result[self.board[i][j + 2] as usize - 1] = true;
+                        }
                     }
                 }
             }
@@ -262,6 +266,17 @@ fn play_vidro() {
         buf += " 3 2 1\n 4 ● 0\n 5 6 7\n";
         buf += "steps: ";
         buf += &vidro.steps.to_string();
+
+        buf += "\nwinner: \n";
+
+        {
+            let winners = vidro.winners();
+            for i in 0..winners.len() {
+                buf += &i.to_string();
+                buf += &winners[i].to_string();
+                buf += "\n";
+            }
+        }
 
         println!("{}", buf);
 
