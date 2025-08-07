@@ -13,6 +13,7 @@ const ANGLES: [(isize, isize); 8] = [
     (1, 1),
 ];
 
+#[derive(Clone)]
 pub struct Vidro {
     board: [[u8; 5]; 5],
     steps: usize,
@@ -149,6 +150,9 @@ impl Vidro {
                 for j in 0..self.board[0].len() {
                     if self.board[i][j] != self.prev_board[i][j] {
                         self.steps += 1;
+
+                        //前の手を保存
+                        self.prev_board = now_board.clone();
                         return Ok(());
                     }
                 }
@@ -206,6 +210,9 @@ impl Vidro {
             }
         }
         result
+    }
+    fn get_now_turn(&self) -> u8 {
+        return self.steps as u8 % self.num_player;
     }
 }
 
@@ -331,6 +338,124 @@ fn play_vidro() {
     }
 }
 
+//ここから下は探索専用
+#[derive(Clone)]
+struct Node {
+    board: Vidro,
+    max_deep: u8,
+    eval: Option<i8>, //1先手勝利, 0引き分け, -1後手勝利, None不明
+    children: Vec<Node>,
+}
+
+impl Node {
+    pub fn new(board: Vidro, max_deep: u8) -> Self {
+        return Node {
+            board: board,
+            max_deep: max_deep,
+            eval: None,
+            children: vec![],
+        };
+    }
+    fn soft_eval(&mut self) -> () {
+        let player_has_piece = &self.board.players_has_piece;
+        if player_has_piece[0] < 3 && player_has_piece[1] < 3 {
+            //7手未満では揃うことが無いため省略する。
+            let winners = self.board.winners();
+            if winners[0] && winners[1] {
+                self.eval = Some(0);
+            } else if winners[0] {
+                self.eval = Some(1);
+            } else if winners[1] {
+                self.eval = Some(-1);
+            }
+        }
+        self.eval = None;
+    }
+    fn search(&mut self) -> () {
+        println!("深さ {}", self.max_deep);
+        if 0 < self.max_deep {
+            let mut new_board;
+
+            //可能な手を全て実行してchildrenにデータをため込む
+            for i in 0..self.board.board.len() {
+                for j in 0..self.board.board[0].len() {
+                    new_board = self.board.clone();
+                    match new_board.set_ohajiki((i, j)) {
+                        Ok(_) => {
+                            self.children.push(Node::new(new_board, self.max_deep - 1));
+                        }
+                        Err(_) => (),
+                    }
+                    for k in 0..7 {
+                        new_board = self.board.clone();
+                        match new_board.flick_ohajiki((i, j), ANGLES[k]) {
+                            Ok(_) => {
+                                self.children.push(Node::new(new_board, self.max_deep - 1));
+                            }
+                            Err(_) => (),
+                        }
+                    }
+                }
+            }
+
+            let mut all_enemy = true; //考えられる未来すべてが負けるかの真偽値
+            let i_win: i8 = if self.board.get_now_turn() == 0 {
+                1
+            } else {
+                -1
+            }; //自分の勝が確定する評価値
+
+            //軽く広く探索する
+            for i in 0..self.children.len() {
+                self.children[i].soft_eval();
+                match self.children[i].eval {
+                    Some(eval) => {
+                        if eval == i_win {
+                            self.eval = Some(i_win);
+                            self.children.clear(); //評価値が確定したためメモリを開放
+                            return;
+                        }
+                    }
+                    None => (),
+                }
+            }
+
+            //重く深く探索する
+            for i in 0..self.children.len() {
+                self.children[i].search();
+                match self.children[i].eval {
+                    Some(eval) => {
+                        if eval == i_win {
+                            self.eval = Some(i_win);
+                            self.children.clear(); //評価値が確定したためメモリを開放
+                            return;
+                        }
+                    }
+                    None => {
+                        all_enemy = false;
+                    }
+                }
+            }
+
+            if all_enemy {
+                self.eval = Some(-i_win);
+                self.children.clear(); //評価値が確定したためメモリを開放
+            } else {
+                self.eval = None;
+            }
+            return;
+        } else {
+            self.eval = None;
+            return;
+        }
+    }
+}
+
 fn main() {
-    play_vidro();
+    // play_vidro();
+    let mut vidro = Vidro::new(2);
+    vidro.set_ohajiki((2, 2)).unwrap();
+    let mut node = Node::new(vidro, 10);
+    node.search();
+    println!("result evaluation: {:?}", node.eval);
 }
