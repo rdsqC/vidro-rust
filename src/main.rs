@@ -364,7 +364,7 @@ fn hash_board(board: &Vidro) -> u64 {
     hash
 }
 
-fn win_eval(hash: u64) -> i8 {
+fn win_eval(hash: u64) -> (i8, bool) {
     let l1 = 5;
     let l2 = 5;
     let num_player = 2;
@@ -409,7 +409,7 @@ fn win_eval(hash: u64) -> i8 {
     }
 
     let eval: i8 = if result[0] { 1 } else { 0 } + if result[1] { -1 } else { 0 };
-    eval
+    (eval, result[0] || result[1])
 }
 
 // fn research(tt: &mut HashMap<u64, (i8, bool)>, deeps: usize) -> bool {}
