@@ -1,5 +1,6 @@
 use Vec;
 use regex::Regex;
+use std::collections::HashMap;
 use std::io;
 
 const ANGLES: [(isize, isize); 8] = [
@@ -339,122 +340,77 @@ fn play_vidro() {
 }
 
 //ここから下は探索専用
-#[derive(Clone)]
-struct Node {
-    board: Vidro,
-    max_deep: u8,
-    eval: Option<i8>, //1先手勝利, 0引き分け, -1後手勝利, None不明
-    children: Vec<Node>,
-}
-
-impl Node {
-    pub fn new(board: Vidro, max_deep: u8) -> Self {
-        return Node {
-            board: board,
-            max_deep: max_deep,
-            eval: None,
-            children: vec![],
-        };
-    }
-    fn soft_eval(&mut self) -> () {
-        let player_has_piece = &self.board.players_has_piece;
-        if player_has_piece[0] < 3 && player_has_piece[1] < 3 {
-            //7手未満では揃うことが無いため省略する。
-            let winners = self.board.winners();
-            if winners[0] && winners[1] {
-                self.eval = Some(0);
-            } else if winners[0] {
-                self.eval = Some(1);
-            } else if winners[1] {
-                self.eval = Some(-1);
-            }
-        }
-        self.eval = None;
-    }
-    fn search(&mut self) -> () {
-        if 0 < self.max_deep {
-            let mut new_board;
-
-            //可能な手を全て実行してchildrenにデータをため込む
-            for i in 0..self.board.board.len() {
-                for j in 0..self.board.board[0].len() {
-                    new_board = self.board.clone();
-                    match new_board.set_ohajiki((i, j)) {
-                        Ok(_) => {
-                            self.children.push(Node::new(new_board, self.max_deep - 1));
-                        }
-                        Err(_) => (),
-                    }
-                    for k in 0..8 {
-                        new_board = self.board.clone();
-                        match new_board.flick_ohajiki((i, j), ANGLES[k]) {
-                            Ok(_) => {
-                                self.children.push(Node::new(new_board, self.max_deep - 1));
-                            }
-                            Err(_) => (),
-                        }
-                    }
-                }
-            }
-
-            let mut all_enemy = true; //考えられる未来すべてが負けるかの真偽値
-            let i_win: i8 = if self.board.get_now_turn() == 0 {
-                1
-            } else {
-                -1
-            }; //自分の勝が確定する評価値
-
-            //軽く広く探索する
-            for i in 0..self.children.len() {
-                self.children[i].soft_eval();
-                match self.children[i].eval {
-                    Some(eval) => {
-                        if eval == i_win {
-                            self.eval = Some(i_win);
-                            self.children.clear(); //評価値が確定したためメモリを開放
-                            return;
-                        }
-                    }
-                    None => (),
-                }
-            }
-
-            //重く深く探索する
-            for i in 0..self.children.len() {
-                self.children[i].search();
-                match self.children[i].eval {
-                    Some(eval) => {
-                        if eval == i_win {
-                            self.eval = Some(i_win);
-                            self.children.clear(); //評価値が確定したためメモリを開放
-                            return;
-                        }
-                    }
-                    None => {
-                        all_enemy = false;
-                    }
-                }
-            }
-
-            if all_enemy {
-                self.eval = Some(-i_win);
-                self.children.clear(); //評価値が確定したためメモリを開放
-            } else {
-                self.eval = None;
-            }
-            return;
-        } else {
-            self.eval = None;
-            return;
+fn hash_board(board: &Vidro) -> u64 {
+    let mut hash: u64 = 0;
+    for i in 0..5 {
+        for j in 0..5 {
+            hash <<= 2;
+            hash |= (board.board[i][j] as u64) & 0b11;
         }
     }
+    hash <<= 2;
+    hash |= (board.get_now_turn() as u64) & 0b11; //手番もまぜる
+    hash
 }
+
+fn win_eval(hash: u64) -> i8 {
+    let l1 = 5;
+    let l2 = 5;
+    let num_player = 2;
+    let mut result: Vec<bool> = vec![false; num_player as usize];
+
+    let board = |v1: usize, v2: usize| -> u64 {
+        let result = hash;
+        result >> 2 >> 2 * (24 - (5 * v1 + v2)) & 0b11
+    };
+
+    for i in 0..l1 {
+        for j in 0..l2 {
+            if i < l1 - 2 {
+                if board(i, j) == board(i + 1, j) && board(i + 1, j) == board(i + 2, j) {
+                    if 0 < board(i, j) as usize {
+                        result[board(i, j) as usize - 1] = true;
+                    }
+                }
+            }
+            if j < l2 - 2 {
+                if board(i, j) == board(i, j + 1) && board(i, j + 1) == board(i, j + 2) {
+                    if 0 < board(i, j) as usize {
+                        result[board(i, j) as usize - 1] = true;
+                    }
+                }
+            }
+            if i < l1 - 2 && j < l2 - 2 {
+                if board(i, j) == board(i + 1, j + 1) && board(i + 1, j + 1) == board(i + 2, j + 2)
+                {
+                    if 0 < board(i, j) as usize {
+                        result[board(i, j) as usize - 1] = true;
+                    }
+                }
+                if board(i, j + 2) == board(i + 1, j + 1) && board(i + 1, j + 1) == board(i + 2, j)
+                {
+                    if 0 < board(i, j + 2) as usize {
+                        result[board(i, j + 2) as usize - 1] = true;
+                    }
+                }
+            }
+        }
+    }
+
+    let eval: i8 = if result[0] { 1 } else { 0 } + if result[1] { -1 } else { 0 };
+    eval
+}
+
+// fn research(tt: &mut HashMap<u64, (i8, bool)>, deeps: usize) -> bool {}
 
 fn main() {
-    // play_vidro();
-    let mut vidro = Vidro::new(2);
-    vidro.set_ohajiki((2, 2)).unwrap();
-    let mut node = Node::new(vidro, 10);
-    node.search();
-    println!("result evaluation: {:?}", node.eval);
+    play_vidro();
+    // let mut vidro = Vidro::new(2);
+    // vidro.set_ohajiki((0, 0)).unwrap();
+    // vidro.set_ohajiki((4, 0)).unwrap();
+    // vidro.set_ohajiki((0, 2)).unwrap();
+    // vidro.flick_ohajiki((4, 0), (0, 1)).unwrap();
+    //
+    // let mut tt: HashMap<u64, (i8, bool)> = HashMap::new(); // 1 先手勝利, -1 後手勝利, 0 引き分け, ふたつめには評価済みかどうかの真偽値
+    // println!("result evaluation: {:?}", research(&mut tt, 24));
 }
