@@ -16,9 +16,9 @@ const ANGLES: [(isize, isize); 8] = [
 
 #[derive(Clone)]
 pub struct Vidro {
-    board: [[u8; 5]; 5],
+    board: u64,
     steps: usize,
-    prev_board: [[u8; 5]; 5],
+    prev_board: u64,
     num_player: u8,
     players_has_piece: Vec<u8>,
 }
@@ -26,26 +26,41 @@ pub struct Vidro {
 impl Vidro {
     pub fn new(num_player: usize) -> Vidro {
         Vidro {
-            board: [[0; 5]; 5],
+            board: 0,
             steps: 0,
-            prev_board: [[0; 5]; 5],
+            prev_board: 0,
             num_player: num_player.try_into().unwrap(),
             players_has_piece: vec![5; num_player],
         }
     }
-    pub fn is_there_surrounding_piece(&self, ohajiki_num: u8, coord: (usize, usize)) -> bool {
+    fn get_trout(&self, v1: usize, v2: usize) -> u64 {
+        let result = self.board;
+        result >> 2 >> 2 * (24 - (5 * v1 + v2)) & 0b11
+    }
+    fn set_trout(&mut self, v1: usize, v2: usize, value: u64) {
+        let mask: u64 = !(0b11 << 2 << 2 * (24 - (5 * v1 + v2)));
+        let set_bit = (value & 0b11) << 2 << 2 * (24 - (5 * v1 + v2));
+        self.board &= mask;
+        self.board |= set_bit;
+    }
+    pub fn get_hash_trout(hash: u64, v1: usize, v2: usize) -> u64 {
+        let result = hash;
+        result >> 2 >> 2 * (24 - (5 * v1 + v2)) & 0b11
+    }
+    fn is_there_surrounding_piece(&self, ohajiki_num: u64, coord: (usize, usize)) -> bool {
         for i in 0..3 {
             for j in 0..3 {
                 if coord.0 as isize + i - 1 < 0
-                    || self.board.len() as isize <= coord.0 as isize + i - 1
+                    || 5 as isize <= coord.0 as isize + i - 1
                     || coord.1 as isize + j - 1 < 0
-                    || self.board[0].len() as isize <= coord.1 as isize + j - 1
+                    || 5 as isize <= coord.1 as isize + j - 1
                 {
                     continue;
                 }
-                if self.board[(coord.0 as isize + i) as usize - 1]
-                    [(coord.1 as isize + j) as usize - 1]
-                    == ohajiki_num
+                if self.get_trout(
+                    (coord.0 as isize + i) as usize - 1,
+                    (coord.1 as isize + j) as usize - 1,
+                ) == ohajiki_num
                 {
                     return true;
                 }
@@ -53,7 +68,7 @@ impl Vidro {
         }
         false
     }
-    pub fn set_ohajiki(&mut self, coord: (usize, usize)) -> Result<(), &'static str> {
+    fn set_ohajiki(&mut self, coord: (usize, usize)) -> Result<(), &'static str> {
         //プレイヤーについている数字+1をそのプレイヤーの石として設計している。
         let now_turn_player = self.steps % (self.num_player as usize);
         let ohajiki_num = (now_turn_player + 1).try_into().unwrap();
@@ -62,7 +77,7 @@ impl Vidro {
             if self.is_there_surrounding_piece(ohajiki_num, coord) {
                 return Err("周りに既に石があります");
             } else {
-                self.board[coord.0][coord.1] = ohajiki_num;
+                self.set_trout(coord.0, coord.1, ohajiki_num);
                 self.players_has_piece[now_turn_player] -= 1;
                 self.steps += 1;
                 return Ok(());
@@ -71,17 +86,17 @@ impl Vidro {
             return Err("もう置く石がありません");
         }
     }
-    pub fn flick_ohajiki(
+    fn flick_ohajiki(
         &mut self,
         coord: (usize, usize),
         angle: (isize, isize),
     ) -> Result<(), &'static str> {
         let now_turn_player = self.steps % (self.num_player as usize);
-        let ohajiki_num: u8 = (now_turn_player + 1).try_into().unwrap();
+        let ohajiki_num: u64 = (now_turn_player + 1).try_into().unwrap();
 
         let now_board = self.board.clone();
 
-        let mut target = self.board[coord.0][coord.1];
+        let mut target = self.get_trout(coord.0, coord.1);
         let mut target_coord: (isize, isize) = (coord.0 as isize, coord.1 as isize);
 
         if target != ohajiki_num {
@@ -97,27 +112,23 @@ impl Vidro {
 
             next = (target_coord.0 + angle.0, target_coord.1 + angle.1);
 
-            if next.0 < 0
-                || self.board.len() as isize <= next.0
-                || next.1 < 0
-                || self.board[0].len() as isize <= next.1
-            {
+            if next.0 < 0 || 5 as isize <= next.0 || next.1 < 0 || 5 as isize <= next.1 {
                 target = 0;
             } else {
                 let u_next = (next.0 as usize, next.1 as usize);
                 let u_target_coord = (target_coord.0 as usize, target_coord.1 as usize);
 
-                match self.board[u_next.0][u_next.1] {
+                match self.get_trout(u_next.0, u_next.1) {
                     0 => {
                         //移動先に何もない場合
-                        self.board[u_next.0][u_next.1] = target;
-                        self.board[u_target_coord.0][u_target_coord.1] = 0;
+                        self.set_trout(u_next.0, u_next.1, target);
+                        self.set_trout(u_target_coord.0, u_target_coord.1, 0);
                         target_coord = next;
                     }
                     _ => {
                         //移動先に駒がある場合
                         target_coord = next;
-                        target = self.board[u_next.0][u_next.1];
+                        target = self.get_trout(u_next.0, u_next.1);
                     }
                 }
             }
@@ -130,9 +141,9 @@ impl Vidro {
             //駒が動かないはじきを禁止
             {
                 let mut is_all = true;
-                for i in 0..self.board.len() {
-                    for j in 0..self.board[0].len() {
-                        if self.board[i][j] != now_board[i][j] {
+                for i in 0..5 {
+                    for j in 0..5 {
+                        if self.get_trout(i, j) != Vidro::get_hash_trout(now_board, i, j) {
                             is_all = false;
                             break;
                         }
@@ -147,9 +158,9 @@ impl Vidro {
             }
 
             //千日手の防止
-            for i in 0..self.board.len() {
-                for j in 0..self.board[0].len() {
-                    if self.board[i][j] != self.prev_board[i][j] {
+            for i in 0..5 {
+                for j in 0..5 {
+                    if self.get_trout(i, j) != Vidro::get_hash_trout(self.prev_board, i, j) {
                         self.steps += 1;
 
                         //前の手を保存
@@ -159,52 +170,52 @@ impl Vidro {
                 }
             }
             //千日手の制約に引っかかる場合
-            for i in 0..self.board.len() {
+            for i in 0..5 {
                 //元の盤面に戻す
-                for j in 0..self.board[0].len() {
-                    self.board[i][j] = now_board[i][j];
+                for j in 0..5 {
+                    self.set_trout(i, j, Vidro::get_hash_trout(now_board, i, j));
                 }
             }
             return Err("千日手です");
         }
     }
     fn winners(&self) -> Vec<bool> {
-        let l1 = self.board.len();
-        let l2 = self.board[0].len();
+        let l1 = 5;
+        let l2 = 5;
         let mut result: Vec<bool> = vec![false; self.num_player as usize];
         for i in 0..l1 {
             for j in 0..l2 {
                 if i < l1 - 2 {
-                    if self.board[i][j] == self.board[i + 1][j]
-                        && self.board[i + 1][j] == self.board[i + 2][j]
+                    if self.get_trout(i, j) == self.get_trout(i + 1, j)
+                        && self.get_trout(i + 1, j) == self.get_trout(i + 2, j)
                     {
-                        if 0 < self.board[i][j] as usize {
-                            result[self.board[i][j] as usize - 1] = true;
+                        if 0 < self.get_trout(i, j) as usize {
+                            result[self.get_trout(i, j) as usize - 1] = true;
                         }
                     }
                 }
                 if j < l2 - 2 {
-                    if self.board[i][j] == self.board[i][j + 1]
-                        && self.board[i][j + 1] == self.board[i][j + 2]
+                    if self.get_trout(i, j) == self.get_trout(i, j + 1)
+                        && self.get_trout(i, j + 1) == self.get_trout(i, j + 2)
                     {
-                        if 0 < self.board[i][j] as usize {
-                            result[self.board[i][j] as usize - 1] = true;
+                        if 0 < self.get_trout(i, j) as usize {
+                            result[self.get_trout(i, j) as usize - 1] = true;
                         }
                     }
                 }
                 if i < l1 - 2 && j < l2 - 2 {
-                    if self.board[i][j] == self.board[i + 1][j + 1]
-                        && self.board[i + 1][j + 1] == self.board[i + 2][j + 2]
+                    if self.get_trout(i, j) == self.get_trout(i + 1, j + 1)
+                        && self.get_trout(i + 1, j + 1) == self.get_trout(i + 2, j + 2)
                     {
-                        if 0 < self.board[i][j] as usize {
-                            result[self.board[i][j] as usize - 1] = true;
+                        if 0 < self.get_trout(i, j) as usize {
+                            result[self.get_trout(i, j) as usize - 1] = true;
                         }
                     }
-                    if self.board[i][j + 2] == self.board[i + 1][j + 1]
-                        && self.board[i + 1][j + 1] == self.board[i + 2][j]
+                    if self.get_trout(i, j + 2) == self.get_trout(i + 1, j + 1)
+                        && self.get_trout(i + 1, j + 1) == self.get_trout(i + 2, j)
                     {
-                        if 0 < self.board[i][j + 2] as usize {
-                            result[self.board[i][j + 2] as usize - 1] = true;
+                        if 0 < self.get_trout(i, j + 2) as usize {
+                            result[self.get_trout(i, j + 2) as usize - 1] = true;
                         }
                     }
                 }
@@ -245,15 +256,15 @@ fn play_vidro() {
         buf += "\n";
 
         buf += "\u{001b}[47m  0 1 2 3 4\u{001b}[0m\n";
-        for i in 0..vidro.board.len() {
+        for i in 0..5 {
             buf += "\u{001b}[47m";
             buf += &i.to_string();
             buf += "\u{001b}[0m";
 
-            for j in 0..vidro.board[0].len() {
+            for j in 0..5 {
                 buf += "\u{001b}[";
-                buf += &(30 + vidro.board[i][j]).to_string();
-                buf += if vidro.board[i][j] == 0 {
+                buf += &(30 + vidro.get_trout(i, j)).to_string();
+                buf += if vidro.get_trout(i, j) == 0 {
                     r"m  "
                 } else {
                     r"m● "
@@ -345,7 +356,7 @@ fn hash_board(board: &Vidro) -> u64 {
     for i in 0..5 {
         for j in 0..5 {
             hash <<= 2;
-            hash |= (board.board[i][j] as u64) & 0b11;
+            hash |= (board.get_trout(i, j) as u64) & 0b11;
         }
     }
     hash <<= 2;
