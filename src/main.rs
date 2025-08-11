@@ -455,6 +455,7 @@ struct Node {
     eval: Eval,
     parent: u64,
     children: Vec<u64>,
+    num_searchs: usize,
 }
 
 impl Node {
@@ -466,6 +467,7 @@ impl Node {
             },
             parent: parent,
             children: vec![],
+            num_searchs: 0,
         }
     }
     fn is_root(&self) -> bool {
@@ -473,43 +475,122 @@ impl Node {
     }
 }
 
-fn research(board: u64, deeps: usize) -> bool {
-    let root_node = Node::new(DONT_HAS_PARENT);
-
-    let mut tt: HashMap<u64, Node> = HashMap::new();
-    tt.insert(board, root_node);
-    let mut target_board = board;
-
+fn create_children(target_board: u64, target_node: &mut Node, tt: &mut HashMap<u64, Node>) {
     let mut new_vidro = Vidro::new(target_board);
-
-    for deep in 0..deeps {
-        //可能な限りの子を作成
-
-        //targetのnodeをttから取得しておく
-        let Some(target_node) = tt.get_mut(&target_board) else {
-            continue;
-        };
-        for i in 0..5 {
-            for j in 0..5 {
-                if let Ok(()) = new_vidro.set_ohajiki((i, j)) {
+    //可能な限りの子を作成
+    for i in 0..5 {
+        for j in 0..5 {
+            if let Ok(()) = new_vidro.set_ohajiki((i, j)) {
+                //テキトー置きが成功したとき
+                //childrenに追加
+                target_node.children.push(new_vidro.board);
+                new_vidro.replace(target_board); //変更が加わってしまった盤面はもういらない。新しく作りなおす。
+            }
+            for a in 0..8 {
+                if let Ok(()) = new_vidro.flick_ohajiki((i, j), ANGLES[a]) {
                     //テキトー置きが成功したとき
                     //childrenに追加
                     target_node.children.push(new_vidro.board);
                     new_vidro.replace(target_board); //変更が加わってしまった盤面はもういらない。新しく作りなおす。
                 }
-                for a in 0..8 {
-                    if let Ok(()) = new_vidro.flick_ohajiki((i, j), ANGLES[a]) {
-                        //テキトー置きが成功したとき
-                        //childrenに追加
-                        target_node.children.push(new_vidro.board);
-                        new_vidro.replace(target_board); //変更が加わってしまった盤面はもういらない。新しく作りなおす。
-                    }
-                }
             }
         }
     }
 
-    return false;
+    //追加した子をttに登録
+    let children = target_node.children.clone();
+    for &child in &children {
+        tt.entry(child).or_insert_with(|| {
+            let mut node = Node::new(target_board);
+            node.eval = win_eval(child);
+            node
+        });
+    }
+}
+
+fn Evals_to_one_eval(turn: u8, results: &Vec<Option<i8>>) -> Eval {
+    let turn_win_eval_value = turn as i8 * (-2) + 1;
+    let enemy_eval_value = -turn_win_eval_value;
+    if results.contains(&Some(turn_win_eval_value)) {
+        Eval {
+            value: Some(turn_win_eval_value),
+            evaluated: true,
+        }
+    } else if results.iter().all(|v| *v == Some(enemy_eval_value)) {
+        Eval {
+            value: Some(enemy_eval_value),
+            evaluated: true,
+        }
+    } else {
+        Eval {
+            value: None,
+            evaluated: true,
+        }
+    }
+}
+
+fn research(root_board: u64, nodes: usize) -> Eval {
+    let root_node = Node::new(DONT_HAS_PARENT);
+    let mut tt: HashMap<u64, Node> = HashMap::new();
+    tt.insert(root_board, root_node);
+
+    let mut target_board = root_board;
+
+    while tt.len() < nodes {
+        //target_boardに基づきtargetのnodeをttから取得しておく
+        let target_node = match tt.get_mut(&target_board) {
+            Some(node) => node,
+            None => break, // 例外処理など必要に応じて
+        };
+
+        //自己評価
+        target_node.eval = win_eval(target_board);
+        if target_node.eval.evaluated {
+            //勝敗が確定
+            //親ノードへ送る
+            if target_node.is_root() {
+                break;
+            }
+            target_board = target_node.parent;
+            //親ノードのsearch_numを増やす
+            if let Some(parent_node) = tt.get_mut(&target_node.parent) {
+                parent_node.num_searchs += 1;
+            }
+            continue;
+        }
+
+        //子ノードを作っていない場合は作成
+        if target_node.children.is_empty() {
+            create_children(target_board, target_node, &mut tt);
+        }
+
+        if target_node.num_searchs < target_node.children.len() {
+            //子ノードへ移動
+            target_board = target_node.children[target_node.num_searchs];
+        } else {
+            //子が全て探索済み
+            //子を使って自己評価
+            target_node.eval = Evals_to_one_eval(
+                target_board as u8 & 0b11,
+                &target_node
+                    .children
+                    .iter()
+                    .map(|id| tt.get(&id).unwrap().eval.value)
+                    .collect::<Vec<_>>(),
+            );
+            //親ノードへ送る
+            if target_node.is_root() {
+                break;
+            }
+            target_board = target_node.parent;
+            //親ノードのsearch_numを増やす
+            if let Some(parent_node) = tt.get_mut(&target_board) {
+                parent_node.num_searchs += 1;
+            }
+        }
+    }
+
+    return tt.get(&root_board).unwrap().eval;
 
     // let tt: &mut HashMap<u64, (i8, bool)>,
 }
