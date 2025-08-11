@@ -511,7 +511,7 @@ fn research(board: u64, deeps: usize) -> bool {
 }
 
 fn main() {
-    // let mut vidro = Vidro::new(2);
+    let vidro = Vidro::new(2);
     research(vidro.board, 10);
     // vidro.set_ohajiki((0, 0)).unwrap();
     // vidro.set_ohajiki((4, 0)).unwrap();
