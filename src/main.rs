@@ -93,7 +93,7 @@ impl Vidro {
     }
     fn set_ohajiki(&mut self, coord: (usize, usize)) -> Result<(), &'static str> {
         //プレイヤーについている数字+1をそのプレイヤーの石として設計している。
-        let now_turn_player = self.steps % (self.num_player as usize);
+        let now_turn_player = self.get_now_turn() as usize;
         let ohajiki_num = (now_turn_player + 1).try_into().unwrap();
 
         if 0 < self.players_has_piece[now_turn_player] {
@@ -103,6 +103,7 @@ impl Vidro {
                 self.set_trout(coord.0, coord.1, ohajiki_num);
                 self.players_has_piece[now_turn_player] -= 1;
                 self.steps += 1;
+                self.set_turn(now_turn_player as u8);
                 return Ok(());
             }
         } else {
@@ -114,7 +115,7 @@ impl Vidro {
         coord: (usize, usize),
         angle: (isize, isize),
     ) -> Result<(), &'static str> {
-        let now_turn_player = self.steps % (self.num_player as usize);
+        let now_turn_player = self.get_now_turn() as usize;
         let ohajiki_num: u64 = (now_turn_player + 1).try_into().unwrap();
 
         let now_board = self.board.clone();
@@ -186,6 +187,7 @@ impl Vidro {
                     if self.get_trout(i, j) != Vidro::get_hash_trout(self.prev_board, i, j) {
                         self.steps += 1;
 
+                        self.set_turn(now_turn_player as u8);
                         //前の手を保存
                         self.prev_board = now_board.clone();
                         return Ok(());
