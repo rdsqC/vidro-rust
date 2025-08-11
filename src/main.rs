@@ -1,6 +1,6 @@
 use Vec;
 use regex::Regex;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::io;
 
 const ANGLES: [(isize, isize); 8] = [
@@ -266,7 +266,7 @@ fn read_buffer() -> String {
 
 const COLOR_RESET: &str = "\u{001b}[0m";
 
-fn play_vidro() {
+fn _play_vidro() {
     let mut vidro = Vidro::new(2);
     let mut buf = String::new();
 
@@ -379,19 +379,6 @@ fn play_vidro() {
 }
 
 //ここから下は探索専用
-fn hash_board(board: &Vidro) -> u64 {
-    let mut hash: u64 = 0;
-    for i in 0..5 {
-        for j in 0..5 {
-            hash <<= 2;
-            hash |= (board.get_trout(i, j) as u64) & 0b11;
-        }
-    }
-    hash <<= 2;
-    hash |= (board.get_now_turn() as u64) & 0b11; //手番もまぜる
-    hash
-}
-
 fn win_eval(hash: u64) -> Eval {
     let l1 = 5;
     let l2 = 5;
@@ -446,6 +433,7 @@ fn win_eval(hash: u64) -> Eval {
 
 const DONT_HAS_PARENT: u64 = u64::MAX; //Nodeにおいて親を持たないことを示す特殊値とする
 
+#[derive(Clone)]
 struct Eval {
     value: Option<i8>,
     evaluated: bool,
@@ -475,7 +463,7 @@ impl Node {
     }
 }
 
-fn create_children(target_board: u64, target_node: &mut Node, tt: &mut HashMap<u64, Node>) {
+fn create_children_on_node(target_board: u64, target_node: &mut Node) {
     let mut new_vidro = Vidro::new(target_board);
     //可能な限りの子を作成
     for i in 0..5 {
@@ -495,16 +483,6 @@ fn create_children(target_board: u64, target_node: &mut Node, tt: &mut HashMap<u
                 }
             }
         }
-    }
-
-    //追加した子をttに登録
-    let children = target_node.children.clone();
-    for &child in &children {
-        tt.entry(child).or_insert_with(|| {
-            let mut node = Node::new(target_board);
-            node.eval = win_eval(child);
-            node
-        });
     }
 }
 
@@ -538,10 +516,8 @@ fn research(root_board: u64, nodes: usize) -> Eval {
 
     while tt.len() < nodes {
         //target_boardに基づきtargetのnodeをttから取得しておく
-        let target_node = match tt.get_mut(&target_board) {
-            Some(node) => node,
-            None => break, // 例外処理など必要に応じて
-        };
+        let target_node = tt.get_mut(&target_board).unwrap();
+        let children = target_node.children.clone();
 
         //自己評価
         target_node.eval = win_eval(target_board);
@@ -561,8 +537,21 @@ fn research(root_board: u64, nodes: usize) -> Eval {
 
         //子ノードを作っていない場合は作成
         if target_node.children.is_empty() {
-            create_children(target_board, target_node, &mut tt);
+            create_children_on_node(target_board, target_node);
+            //追加した子をttに登録
+
+            let _ = target_node;
+            for &child in &children {
+                tt.entry(child).or_insert_with(|| {
+                    let mut node = Node::new(target_board);
+                    node.eval = win_eval(child);
+                    node
+                });
+            }
+            // add_children_tt(target_board, target_node, &mut tt);
+            // create_children(target_board, target_node, &mut tt);
         }
+        let target_node = tt.get_mut(&target_board).unwrap();
 
         if target_node.num_searchs < target_node.children.len() {
             //子ノードへ移動
@@ -570,14 +559,15 @@ fn research(root_board: u64, nodes: usize) -> Eval {
         } else {
             //子が全て探索済み
             //子を使って自己評価
-            target_node.eval = evals_to_one_eval(
+            let eval_result = evals_to_one_eval(
                 target_board as u8 & 0b11,
-                &target_node
-                    .children
+                &children
                     .iter()
                     .map(|id| tt.get(&id).unwrap().eval.value)
                     .collect::<Vec<_>>(),
             );
+            let target_node = tt.get_mut(&target_board).unwrap();
+            target_node.eval = eval_result;
             //親ノードへ送る
             if target_node.is_root() {
                 break;
@@ -590,7 +580,7 @@ fn research(root_board: u64, nodes: usize) -> Eval {
         }
     }
 
-    return tt.get(&root_board).unwrap().eval;
+    return tt.get(&root_board).unwrap().eval.clone();
 }
 
 fn main() {
