@@ -392,7 +392,7 @@ fn hash_board(board: &Vidro) -> u64 {
     hash
 }
 
-fn win_eval(hash: u64) -> (i8, bool) {
+fn win_eval(hash: u64) -> Eval {
     let l1 = 5;
     let l2 = 5;
     let num_player = 2;
@@ -437,13 +437,17 @@ fn win_eval(hash: u64) -> (i8, bool) {
     }
 
     let eval: i8 = if result[0] { 1 } else { 0 } + if result[1] { -1 } else { 0 };
-    (eval, result[0] || result[1])
+    let evaluted = result[0] || result[1];
+    Eval {
+        value: if evaluted { Some(eval) } else { None },
+        evaluated: evaluted,
+    }
 }
 
 const DONT_HAS_PARENT: u64 = u64::MAX; //Nodeにおいて親を持たないことを示す特殊値とする
 
 struct Eval {
-    value: i8,
+    value: Option<i8>,
     evaluated: bool,
 }
 
@@ -457,7 +461,7 @@ impl Node {
     pub fn new(parent: u64) -> Self {
         Node {
             eval: Eval {
-                value: 0,
+                value: None,
                 evaluated: false,
             },
             parent: parent,
