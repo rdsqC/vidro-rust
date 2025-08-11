@@ -508,7 +508,7 @@ fn create_children(target_board: u64, target_node: &mut Node, tt: &mut HashMap<u
     }
 }
 
-fn Evals_to_one_eval(turn: u8, results: &Vec<Option<i8>>) -> Eval {
+fn evals_to_one_eval(turn: u8, results: &Vec<Option<i8>>) -> Eval {
     let turn_win_eval_value = turn as i8 * (-2) + 1;
     let enemy_eval_value = -turn_win_eval_value;
     if results.contains(&Some(turn_win_eval_value)) {
@@ -553,7 +553,7 @@ fn research(root_board: u64, nodes: usize) -> Eval {
             }
             target_board = target_node.parent;
             //親ノードのsearch_numを増やす
-            if let Some(parent_node) = tt.get_mut(&target_node.parent) {
+            if let Some(parent_node) = tt.get_mut(&target_board) {
                 parent_node.num_searchs += 1;
             }
             continue;
@@ -570,7 +570,7 @@ fn research(root_board: u64, nodes: usize) -> Eval {
         } else {
             //子が全て探索済み
             //子を使って自己評価
-            target_node.eval = Evals_to_one_eval(
+            target_node.eval = evals_to_one_eval(
                 target_board as u8 & 0b11,
                 &target_node
                     .children
@@ -591,8 +591,6 @@ fn research(root_board: u64, nodes: usize) -> Eval {
     }
 
     return tt.get(&root_board).unwrap().eval;
-
-    // let tt: &mut HashMap<u64, (i8, bool)>,
 }
 
 fn main() {
