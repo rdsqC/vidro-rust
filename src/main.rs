@@ -20,17 +20,27 @@ pub struct Vidro {
     steps: usize,
     prev_board: u64,
     num_player: u8,
-    players_has_piece: Vec<u8>,
+    players_has_piece: [u8; 2],
 }
 
 impl Vidro {
-    pub fn new(num_player: usize) -> Vidro {
+    pub fn new(board: u64) -> Vidro {
+        let mut board = board;
+        let mut players_has_piece = [5; 2];
+        for _ in 0..25 {
+            board >>= 2;
+            match board & 0b11 {
+                0b01 => players_has_piece[0] -= 1,
+                0b10 => players_has_piece[1] -= 1,
+                _ => (),
+            }
+        }
         Vidro {
-            board: 0,
+            board: board,
             steps: 0,
             prev_board: 0,
-            num_player: num_player.try_into().unwrap(),
-            players_has_piece: vec![5; num_player],
+            num_player: 2, //強制的2人プレイ
+            players_has_piece: players_has_piece,
         }
     }
     fn get_trout(&self, v1: usize, v2: usize) -> u64 {
@@ -46,6 +56,19 @@ impl Vidro {
     pub fn get_hash_trout(hash: u64, v1: usize, v2: usize) -> u64 {
         let result = hash;
         result >> 2 >> 2 * (24 - (5 * v1 + v2)) & 0b11
+    }
+    pub fn get_hash_trout_index(hash: u64, index: usize) -> u64 {
+        let result = hash;
+        result >> 2 >> 2 * (24 - index)
+    }
+    pub fn set_hash_turn(hash: u64, turn: u8) -> u64 {
+        let mut result = hash;
+        result &= !0b11;
+        result |= turn as u64 & 0b11;
+        result
+    }
+    fn set_turn(&mut self, turn: u8) {
+        self.board = Self::set_hash_turn(self.board, turn);
     }
     fn is_there_surrounding_piece(&self, ohajiki_num: u64, coord: (usize, usize)) -> bool {
         for i in 0..3 {
