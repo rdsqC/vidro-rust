@@ -433,12 +433,13 @@ fn win_eval(hash: u64) -> Eval {
 
 const DONT_HAS_PARENT: u64 = u64::MAX; //Nodeにおいて親を持たないことを示す特殊値とする
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct Eval {
     value: Option<i8>,
     evaluated: bool,
 }
 
+#[derive(Debug)]
 struct Node {
     eval: Eval,
     parent: u64,
@@ -517,7 +518,6 @@ fn research(root_board: u64, nodes: usize) -> Eval {
     while tt.len() < nodes {
         //target_boardに基づきtargetのnodeをttから取得しておく
         let target_node = tt.get_mut(&target_board).unwrap();
-        let children = target_node.children.clone();
 
         //自己評価
         target_node.eval = win_eval(target_board);
@@ -537,19 +537,21 @@ fn research(root_board: u64, nodes: usize) -> Eval {
 
         //子ノードを作っていない場合は作成
         if target_node.children.is_empty() {
+            println!("will add nodes");
             create_children_on_node(target_board, target_node);
-            //追加した子をttに登録
 
+            //追加した子をttに登録
+            let children = target_node.children.clone();
             let _ = target_node;
-            for &child in &children {
-                tt.entry(child).or_insert_with(|| {
+            for &childid in &children {
+                tt.entry(childid).or_insert_with(|| {
                     let mut node = Node::new(target_board);
-                    node.eval = win_eval(child);
+                    node.eval = win_eval(childid);
                     node
                 });
             }
-            // add_children_tt(target_board, target_node, &mut tt);
-            // create_children(target_board, target_node, &mut tt);
+            println!("added nodes now nodes: {}", tt.len());
+            println!("nodes: {:#?}", tt);
         }
         let target_node = tt.get_mut(&target_board).unwrap();
 
@@ -559,6 +561,8 @@ fn research(root_board: u64, nodes: usize) -> Eval {
         } else {
             //子が全て探索済み
             //子を使って自己評価
+            println!("evaluate from children");
+            let children = target_node.children.clone();
             let eval_result = evals_to_one_eval(
                 target_board as u8 & 0b11,
                 &children
@@ -584,8 +588,10 @@ fn research(root_board: u64, nodes: usize) -> Eval {
 }
 
 fn main() {
+    println!("aaii");
     let vidro = Vidro::new(2);
-    research(vidro.board, 10);
+    let result = research(vidro.board, 52);
+    println!("result: {:?}", result);
     // vidro.set_ohajiki((0, 0)).unwrap();
     // vidro.set_ohajiki((4, 0)).unwrap();
     // vidro.set_ohajiki((0, 2)).unwrap();
