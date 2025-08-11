@@ -1,6 +1,6 @@
 use Vec;
 use regex::Regex;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io;
 
 const ANGLES: [(isize, isize); 8] = [
@@ -37,11 +37,14 @@ impl Vidro {
         }
         Vidro {
             board: board,
-            steps: 0,
+            steps: board as usize & 0b11,
             prev_board: 0,
             num_player: 2, //強制的2人プレイ
             players_has_piece: players_has_piece,
         }
+    }
+    fn replace(&mut self, board: u64) {
+        *self = Self::new(board);
     }
     fn get_trout(&self, v1: usize, v2: usize) -> u64 {
         let result = self.board;
@@ -437,6 +440,8 @@ fn win_eval(hash: u64) -> (i8, bool) {
     (eval, result[0] || result[1])
 }
 
+const DONT_HAS_PARENT: u64 = u64::MAX; //Nodeにおいて親を持たないことを示す特殊値とする
+
 struct Eval {
     value: i8,
     evaluated: bool,
@@ -444,14 +449,70 @@ struct Eval {
 
 struct Node {
     eval: Eval,
-    parent: u64, //0b
+    parent: u64,
     children: Vec<u64>,
 }
 
+impl Node {
+    pub fn new(parent: u64) -> Self {
+        Node {
+            eval: Eval {
+                value: 0,
+                evaluated: false,
+            },
+            parent: parent,
+            children: vec![],
+        }
+    }
+    fn is_root(&self) -> bool {
+        self.parent == DONT_HAS_PARENT
+    }
+}
+
+fn research(board: u64, deeps: usize) -> bool {
+    let root_node = Node::new(DONT_HAS_PARENT);
+
+    let mut tt: HashMap<u64, Node> = HashMap::new();
+    tt.insert(board, root_node);
+    let mut target_board = board;
+
+    let mut new_vidro = Vidro::new(target_board);
+
+    for deep in 0..deeps {
+        //可能な限りの子を作成
+
+        //targetのnodeをttから取得しておく
+        let Some(target_node) = tt.get_mut(&target_board) else {
+            continue;
+        };
+        for i in 0..5 {
+            for j in 0..5 {
+                if let Ok(()) = new_vidro.set_ohajiki((i, j)) {
+                    //テキトー置きが成功したとき
+                    //childrenに追加
+                    target_node.children.push(new_vidro.board);
+                    new_vidro.replace(target_board); //変更が加わってしまった盤面はもういらない。新しく作りなおす。
+                }
+                for a in 0..8 {
+                    if let Ok(()) = new_vidro.flick_ohajiki((i, j), ANGLES[a]) {
+                        //テキトー置きが成功したとき
+                        //childrenに追加
+                        target_node.children.push(new_vidro.board);
+                        new_vidro.replace(target_board); //変更が加わってしまった盤面はもういらない。新しく作りなおす。
+                    }
+                }
+            }
+        }
+    }
+
+    return false;
+
+    // let tt: &mut HashMap<u64, (i8, bool)>,
+}
 
 fn main() {
-    play_vidro();
     // let mut vidro = Vidro::new(2);
+    research(vidro.board, 10);
     // vidro.set_ohajiki((0, 0)).unwrap();
     // vidro.set_ohajiki((4, 0)).unwrap();
     // vidro.set_ohajiki((0, 2)).unwrap();
