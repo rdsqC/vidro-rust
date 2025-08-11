@@ -435,7 +435,17 @@ fn win_eval(hash: u64) -> (i8, bool) {
     (eval, result[0] || result[1])
 }
 
-// fn research(tt: &mut HashMap<u64, (i8, bool)>, deeps: usize) -> bool {}
+struct Eval {
+    value: i8,
+    evaluated: bool,
+}
+
+struct Node {
+    eval: Eval,
+    parent: u64, //0b
+    children: Vec<u64>,
+}
+
 
 fn main() {
     play_vidro();
