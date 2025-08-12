@@ -1,7 +1,8 @@
 use Vec;
 use regex::Regex;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
+use std::time::{Duration, Instant};
 
 const ANGLES: [(isize, isize); 8] = [
     (0, 1),
@@ -502,7 +503,8 @@ impl Node {
     }
 }
 
-fn create_children_on_node(target_board: u64, target_node: &mut Node) {
+fn create_children_on_node(target_board: u64) -> Vec<u64> {
+    let mut children = Vec::new();
     let mut new_vidro = Vidro::new(target_board);
     //可能な限りの子を作成
     for i in 0..5 {
@@ -510,19 +512,24 @@ fn create_children_on_node(target_board: u64, target_node: &mut Node) {
             if let Ok(()) = new_vidro.set_ohajiki((i, j)) {
                 //テキトー置きが成功したとき
                 //childrenに追加
-                target_node.children.push(new_vidro.board);
+                children.push(new_vidro.board);
                 new_vidro.replace(target_board); //変更が加わってしまった盤面はもういらない。新しく作りなおす。
             }
+        }
+    }
+    for i in 0..5 {
+        for j in 0..5 {
             for a in 0..8 {
                 if let Ok(()) = new_vidro.flick_ohajiki((i, j), ANGLES[a]) {
                     //テキトー置きが成功したとき
                     //childrenに追加
-                    target_node.children.push(new_vidro.board);
+                    children.push(new_vidro.board);
                     new_vidro.replace(target_board); //変更が加わってしまった盤面はもういらない。新しく作りなおす。
                 }
             }
         }
     }
+    children
 }
 
 fn evals_to_one_eval(turn: u8, results: &Vec<Option<i8>>) -> Eval {
@@ -611,7 +618,7 @@ fn research(root_board: u64, nodes: usize) -> Eval {
 
         //子ノードを作っていない場合は作成
         if target_node.children.is_empty() {
-            create_children_on_node(target_board, target_node);
+            let children = create_children_on_node(target_board);
             //追加した子をttに登録
             let children = target_node.children.clone();
             let _ = target_node;
@@ -670,13 +677,148 @@ fn research(root_board: u64, nodes: usize) -> Eval {
     return tt.get(&root_board).unwrap().eval.clone();
 }
 
-fn main() {
-    println!("aaii");
-    let vidro = Vidro::new(0);
-    let num_nodes = {
-        let a: usize = 2;
-        a.pow(20)
+fn alphabeta(
+    board: u64,
+    depth: usize,
+    alpha: i8,
+    beta: i8,
+    maximizing: bool,
+    tt: &mut HashMap<u64, Node>,
+    route: &mut HashSet<u64>,
+    process: &mut Progress,
+) -> i8 {
+    process.update(depth, tt.len());
+
+    //千日手判定
+    if route.contains(&board) {
+        return 0; //引き分け評価
+    }
+    route.insert(board);
+
+    if let Some(cached) = tt.get(&board) {
+        if cached.eval.evaluated {
+            if let Some(v) = cached.eval.value {
+                return v;
+            }
+        }
+    }
+
+    //自己評価
+    let eval = win_eval(board);
+    if eval.evaluated || depth == 0 {
+        let value = eval.value.unwrap_or(0);
+        tt.entry(board)
+            .or_insert_with(|| Node::new(DONT_HAS_PARENT))
+            .eval = Eval {
+            value: Some(value),
+            evaluated: true,
+        };
+        return value;
+    }
+
+    let children = create_children_on_node(board);
+
+    let mut alpha = alpha;
+    let mut beta = beta;
+    let mut value;
+
+    if maximizing {
+        value = i8::MIN;
+        for &child in &children {
+            let score = alphabeta(child, depth - 1, alpha, beta, false, tt, route, process);
+            value = value.max(score);
+            alpha = alpha.max(value);
+            if alpha >= beta {
+                break;
+            }
+        }
+    } else {
+        value = i8::MAX;
+        for &child in &children {
+            let score = alphabeta(child, depth - 1, alpha, beta, true, tt, route, process);
+            value = value.min(score);
+            beta = beta.min(value);
+            if beta <= alpha {
+                break;
+            }
+        }
+    }
+
+    tt.entry(board)
+        .or_insert_with(|| Node::new(DONT_HAS_PARENT))
+        .eval = Eval {
+        value: Some(value),
+        evaluated: true,
     };
-    let result = research(vidro.board, num_nodes);
-    println!("result: {:?}", result);
+
+    let node = tt
+        .entry(board)
+        .or_insert_with(|| Node::new(DONT_HAS_PARENT));
+    node.children = children;
+    node.eval = Eval {
+        value: Some(value),
+        evaluated: true,
+    };
+
+    value
+}
+
+struct Progress {
+    nodes_searched: usize,
+    last_print: Instant,
+}
+
+impl Progress {
+    fn new() -> Self {
+        Self {
+            nodes_searched: 0,
+            last_print: Instant::now(),
+        }
+    }
+
+    fn update(&mut self, current_depth: usize, tt_size: usize) {
+        self.nodes_searched += 1;
+        let now = Instant::now();
+        if now.duration_since(self.last_print) >= Duration::from_secs(10) {
+            println!(
+                "探索ノード数: {}, 現在深さ: {}, TTサイズ: {}",
+                self.nodes_searched, current_depth, tt_size
+            );
+            self.last_print = now;
+        }
+    }
+}
+
+fn main() {
+    // println!("aaii");
+    // let num_nodes = {
+    //     let a: usize = 2;
+    //     a.pow(20)
+    // };
+    // let result = research(vidro.board, num_nodes);
+    // println!("result: {:?}", result);
+
+    let mut vidro = Vidro::new(0);
+
+    vidro.set_ohajiki((2, 2)).unwrap();
+    vidro.set_ohajiki((0, 0)).unwrap();
+    vidro.set_ohajiki((0, 4)).unwrap();
+    vidro.set_ohajiki((2, 0)).unwrap();
+    vidro.set_ohajiki((2, 4)).unwrap();
+
+    let mut process = Progress::new();
+    let mut tt: HashMap<u64, Node> = HashMap::new();
+    let mut route: HashSet<u64> = HashSet::new();
+    let depth = 75;
+    let result = alphabeta(
+        vidro.board,
+        depth,
+        i8::MIN,
+        i8::MAX,
+        true,
+        &mut tt,
+        &mut route,
+        &mut process,
+    );
+    println!("評価値: {}", result);
 }
