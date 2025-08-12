@@ -257,8 +257,8 @@ impl Vidro {
     fn get_now_turn(&self) -> u8 {
         return self.steps as u8 % self.num_player;
     }
-    fn to_string(&self) -> String {
-        let mut vidro = self;
+    fn _to_string(&self) -> String {
+        let vidro = self;
         let mut buf = String::new();
 
         buf += "now turn player: ";
@@ -473,8 +473,8 @@ const DONT_HAS_PARENT: u64 = u64::MAX; //Nodeにおいて親を持たないこ�
 
 #[derive(Clone, Debug)]
 struct Eval {
-    value: Option<i8>,
-    evaluated: bool,
+    value: Option<i8>, // 1 先手勝利, -1 後手勝利, 0 引き分け, None 探索しきれなかった
+    evaluated: bool,   //評価済みかどうか
 }
 
 #[derive(Debug)]
@@ -570,8 +570,8 @@ fn research(root_board: u64, nodes: usize) -> Eval {
     }
 
     while tt.len() < nodes {
-        println!("■now target_board: {}", target_board);
-        println!("now route: {:?}", route);
+        // println!("■now target_board: {}", target_board);
+        // println!("now route: {:?}", route);
 
         //target_boardに基づきtargetのnodeをttから取得しておく
         let target_node = tt.get_mut(&target_board).unwrap();
@@ -617,30 +617,13 @@ fn research(root_board: u64, nodes: usize) -> Eval {
             let _ = target_node;
 
             for &childid in &children {
-                if tt.contains_key(&childid) {
-                    println!("tt already has childid: {}", childid);
-                } else {
-                    println!("tt does NOT have childid: {}", childid);
-                }
-            }
-
-            let mut new_nodes_count = 0;
-
-            for &childid in &children {
-                let entry = tt.entry(childid);
-                if let std::collections::hash_map::Entry::Vacant(e) = entry {
+                tt.entry(childid).or_insert_with(|| {
                     let mut node = Node::new(target_board);
                     node.eval = win_eval(childid);
-                    e.insert(node);
-                    new_nodes_count += 1;
                     // node.eval = win_eval(childid);
-                } else {
-                }
-                // tt.entry(childid).or_insert_with(|| {});
+                    node
+                });
             }
-            println!("added nodes new nodes: {}", new_nodes_count);
-            println!("now nodes: {}", tt.len());
-            // println!("nodes: {:#?}", tt);
         }
         let target_node = tt.get_mut(&target_board).unwrap();
 
@@ -648,7 +631,7 @@ fn research(root_board: u64, nodes: usize) -> Eval {
             //子ノードへ移動を試みる
             let transition_to = target_node.children[target_node.num_searchs];
             if route.contains(&transition_to) {
-                println!("祖先召喚をしてしまった board: {}", target_board);
+                // println!("祖先召喚をしてしまった board: {}", target_board);
                 target_node.num_searchs += 1;
                 continue;
             } else {
@@ -660,7 +643,6 @@ fn research(root_board: u64, nodes: usize) -> Eval {
         } else {
             //子が全て探索済み
             //子を使って自己評価
-            println!("evaluate from children");
             let children = target_node.children.clone();
             let eval_result = evals_to_one_eval(
                 target_board as u8 & 0b11,
@@ -684,30 +666,17 @@ fn research(root_board: u64, nodes: usize) -> Eval {
             }
         }
     }
-    println!("last tt: {:#?}", tt.len());
-    let a = tt.get(&root_board).unwrap();
-    println!("root: {:?}", a);
-    let children = a.children.clone();
-    for &childid in &children {
-        if let Some(child) = tt.get_mut(&childid) {
-            println!("{}", childid);
-            println!("{:#?}\n", child);
-        }
-    }
-
+    println!("{:?}", tt.get(&root_board).unwrap());
     return tt.get(&root_board).unwrap().eval.clone();
 }
 
 fn main() {
     println!("aaii");
     let vidro = Vidro::new(0);
-    let result = research(vidro.board, 52);
+    let num_nodes = {
+        let a: usize = 2;
+        a.pow(20)
+    };
+    let result = research(vidro.board, num_nodes);
     println!("result: {:?}", result);
-    // vidro.set_ohajiki((0, 0)).unwrap();
-    // vidro.set_ohajiki((4, 0)).unwrap();
-    // vidro.set_ohajiki((0, 2)).unwrap();
-    // vidro.flick_ohajiki((4, 0), (0, 1)).unwrap();
-    //
-    // let mut tt: HashMap<u64, (i8, bool)> = HashMap::new(); // 1 先手勝利, -1 後手勝利, 0 引き分け, ふたつめには評価済みかどうかの真偽値
-    // println!("result evaluation: {:?}", research(&mut tt, 24));
 }
