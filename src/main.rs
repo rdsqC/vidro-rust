@@ -1,8 +1,11 @@
 use Vec;
+use lru::LruCache;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
-use std::io;
+use std::num::NonZeroUsize;
+use std::sync::atomic::AtomicUsize;
 use std::time::{Duration, Instant};
+use std::{io, result};
 
 const ANGLES: [(isize, isize); 8] = [
     (0, 1),
@@ -464,8 +467,17 @@ fn win_eval(hash: u64) -> Eval {
 
     let eval: i8 = if result[0] { 1 } else { 0 } + if result[1] { -1 } else { 0 };
     let evaluted = result[0] || result[1];
+    let value = if evaluted {
+        if eval == 0 {
+            EvalValue::Draw
+        } else {
+            EvalValue::Win(eval)
+        }
+    } else {
+        EvalValue::Unknown
+    };
     Eval {
-        value: if evaluted { Some(eval) } else { None },
+        value: value,
         evaluated: evaluted,
     }
 }
@@ -473,12 +485,18 @@ fn win_eval(hash: u64) -> Eval {
 const DONT_HAS_PARENT: u64 = u64::MAX; //Nodeにおいて親を持たないことを示す特殊値とする
 
 #[derive(Clone, Debug)]
-struct Eval {
-    value: Option<i8>, // 1 先手勝利, -1 後手勝利, 0 引き分け, None 探索しきれなかった
-    evaluated: bool,   //評価済みかどうか
+enum EvalValue {
+    Win(i8),
+    Draw,    //探索的千日手などの引き合分け
+    Unknown, //深さ不足で未確定
 }
 
-#[derive(Debug)]
+#[derive(Clone)]
+struct Eval {
+    value: EvalValue,
+    evaluated: bool, //評価済みかどうか
+}
+
 struct Node {
     eval: Eval,
     parent: u64,
@@ -490,7 +508,7 @@ impl Node {
     pub fn new(parent: u64) -> Self {
         Node {
             eval: Eval {
-                value: None,
+                value: EvalValue::Unknown,
                 evaluated: false,
             },
             parent: parent,
@@ -532,149 +550,13 @@ fn create_children_on_node(target_board: u64) -> Vec<u64> {
     children
 }
 
-fn evals_to_one_eval(turn: u8, results: &Vec<Option<i8>>) -> Eval {
-    let turn_win_eval_value = turn as i8 * (-2) + 1;
-    let enemy_eval_value = -turn_win_eval_value;
-    if results.contains(&Some(turn_win_eval_value)) {
-        Eval {
-            value: Some(turn_win_eval_value),
-            evaluated: true,
-        }
-    } else if results.iter().all(|v| *v == Some(enemy_eval_value)) {
-        Eval {
-            value: Some(enemy_eval_value),
-            evaluated: true,
-        }
+fn get_or_insert(tt: &mut LruCache<u64, Node>, board: u64) -> &mut Node {
+    if tt.contains(&board) {
+        tt.get_mut(&board).unwrap()
     } else {
-        Eval {
-            value: None,
-            evaluated: true,
-        }
+        tt.put(board, Node::new(DONT_HAS_PARENT));
+        tt.get_mut(&board).unwrap()
     }
-}
-
-const SEARCHING_SENNICHITE_EVAL: Eval = Eval {
-    value: Some(0),
-    evaluated: true,
-};
-
-fn research(root_board: u64, nodes: usize) -> Eval {
-    let root_node = Node::new(DONT_HAS_PARENT);
-    let mut tt: HashMap<u64, Node> = HashMap::new();
-    tt.insert(root_board, root_node);
-
-    let mut target_board = root_board;
-
-    let mut route = Vec::new(); //探索経路記録
-    route.push(target_board);
-
-    fn transition_up(route: &mut Vec<u64>) {
-        route.pop();
-    }
-
-    fn transition_down(target_board: u64, route: &mut Vec<u64>) {
-        route.push(target_board);
-    }
-
-    while tt.len() < nodes {
-        // println!("■now target_board: {}", target_board);
-        // println!("now route: {:?}", route);
-
-        //target_boardに基づきtargetのnodeをttから取得しておく
-        let target_node = tt.get_mut(&target_board).unwrap();
-
-        //既に評価済みの場合
-        if target_node.eval.evaluated {
-            //親ノードへ送る
-            transition_up(&mut route); //探索枝の上昇を記録
-            if target_node.is_root() {
-                break;
-            }
-            target_board = target_node.parent;
-            //親ノードのsearch_numを増やす
-            if let Some(parent_node) = tt.get_mut(&target_board) {
-                parent_node.num_searchs += 1;
-            }
-            continue;
-        }
-
-        //自己評価
-        target_node.eval = win_eval(target_board);
-        if target_node.eval.evaluated {
-            //勝敗が確定
-            //親ノードへ送る
-            transition_up(&mut route); //探索枝の上昇を記録
-            if target_node.is_root() {
-                println!("break!");
-                break;
-            }
-            target_board = target_node.parent;
-            //親ノードのsearch_numを増やす
-            if let Some(parent_node) = tt.get_mut(&target_board) {
-                parent_node.num_searchs += 1;
-            }
-            continue;
-        }
-
-        //子ノードを作っていない場合は作成
-        if target_node.children.is_empty() {
-            let children = create_children_on_node(target_board);
-            //追加した子をttに登録
-            let children = target_node.children.clone();
-            let _ = target_node;
-
-            for &childid in &children {
-                tt.entry(childid).or_insert_with(|| {
-                    let mut node = Node::new(target_board);
-                    node.eval = win_eval(childid);
-                    // node.eval = win_eval(childid);
-                    node
-                });
-            }
-        }
-        let target_node = tt.get_mut(&target_board).unwrap();
-
-        if target_node.num_searchs < target_node.children.len() {
-            //子ノードへ移動を試みる
-            let transition_to = target_node.children[target_node.num_searchs];
-            if route.contains(&transition_to) {
-                // println!("祖先召喚をしてしまった board: {}", target_board);
-                target_node.num_searchs += 1;
-                continue;
-            } else {
-                //祖先には自分の子供が居ない
-                transition_down(transition_to, &mut route);
-                target_board = transition_to;
-                continue;
-            }
-        } else {
-            //子が全て探索済み
-            //子を使って自己評価
-            let children = target_node.children.clone();
-            let eval_result = evals_to_one_eval(
-                target_board as u8 & 0b11,
-                &children
-                    .iter()
-                    .map(|id| tt.get(&id).unwrap().eval.value)
-                    .collect::<Vec<_>>(),
-            );
-            let target_node = tt.get_mut(&target_board).unwrap();
-            target_node.eval = eval_result;
-            //親ノードへ送る
-            transition_up(&mut route);
-            if target_node.is_root() {
-                println!("break!");
-                break;
-            }
-            target_board = target_node.parent;
-            //親ノードのsearch_numを増やす
-            if let Some(parent_node) = tt.get_mut(&target_board) {
-                parent_node.num_searchs += 1;
-            }
-        }
-    }
-    println!("{:?}", tt.get(&root_board).unwrap());
-    return tt.get(&root_board).unwrap().eval.clone();
 }
 
 fn alphabeta(
@@ -683,22 +565,23 @@ fn alphabeta(
     alpha: i8,
     beta: i8,
     maximizing: bool,
-    tt: &mut HashMap<u64, Node>,
+    tt: &mut LruCache<Board, Node>,
     route: &mut HashSet<u64>,
     process: &mut Progress,
-) -> i8 {
+) -> EvalValue {
     process.update(depth, tt.len());
 
     //千日手判定
     if route.contains(&board) {
-        return 0; //引き分け評価
+        return EvalValue::Draw; //引き分け評価
     }
     route.insert(board);
 
     if let Some(cached) = tt.get(&board) {
         if cached.eval.evaluated {
-            if let Some(v) = cached.eval.value {
-                return v;
+            if let EvalValue::Win(v) = cached.eval.value {
+                route.remove(&board); // 探索パスから除去して戻る
+                return EvalValue::Win(v);
             }
         }
     }
@@ -706,14 +589,14 @@ fn alphabeta(
     //自己評価
     let eval = win_eval(board);
     if eval.evaluated || depth == 0 {
-        let value = eval.value.unwrap_or(0);
-        tt.entry(board)
-            .or_insert_with(|| Node::new(DONT_HAS_PARENT))
-            .eval = Eval {
-            value: Some(value),
+        let eval = eval.value;
+        get_or_insert(tt, board).eval = Eval {
+            value: eval.clone(),
             evaluated: true,
         };
-        return value;
+
+        route.remove(&board); // 探索パスから除去して戻る
+        return eval;
     }
 
     let children = create_children_on_node(board);
@@ -725,7 +608,11 @@ fn alphabeta(
     if maximizing {
         value = i8::MIN;
         for &child in &children {
-            let score = alphabeta(child, depth - 1, alpha, beta, false, tt, route, process);
+            let score = match alphabeta(child, depth - 1, alpha, beta, false, tt, route, process) {
+                EvalValue::Win(score) => score,
+                EvalValue::Draw => 0,
+                EvalValue::Unknown => continue,
+            };
             value = value.max(score);
             alpha = alpha.max(value);
             if alpha >= beta {
@@ -735,7 +622,11 @@ fn alphabeta(
     } else {
         value = i8::MAX;
         for &child in &children {
-            let score = alphabeta(child, depth - 1, alpha, beta, true, tt, route, process);
+            let score = match alphabeta(child, depth - 1, alpha, beta, true, tt, route, process) {
+                EvalValue::Win(score) => score,
+                EvalValue::Draw => 0,
+                EvalValue::Unknown => continue,
+            };
             value = value.min(score);
             beta = beta.min(value);
             if beta <= alpha {
@@ -744,23 +635,23 @@ fn alphabeta(
         }
     }
 
-    tt.entry(board)
-        .or_insert_with(|| Node::new(DONT_HAS_PARENT))
-        .eval = Eval {
-        value: Some(value),
-        evaluated: true,
+    let this_node_eval = match value {
+        0 => EvalValue::Draw,
+        i8::MIN => EvalValue::Unknown,
+        i8::MAX => EvalValue::Unknown,
+        _ => EvalValue::Win(value),
     };
 
-    let node = tt
-        .entry(board)
-        .or_insert_with(|| Node::new(DONT_HAS_PARENT));
+    let node = get_or_insert(tt, board);
     node.children = children;
     node.eval = Eval {
-        value: Some(value),
+        value: this_node_eval.clone(),
         evaluated: true,
     };
 
-    value
+    route.remove(&board); // 探索パスから除去して戻る
+
+    this_node_eval
 }
 
 struct Progress {
@@ -789,6 +680,8 @@ impl Progress {
     }
 }
 
+type Board = u64;
+
 fn main() {
     // println!("aaii");
     // let num_nodes = {
@@ -797,28 +690,46 @@ fn main() {
     // };
     // let result = research(vidro.board, num_nodes);
     // println!("result: {:?}", result);
+    let capacity = NonZeroUsize::new(1_000_000).unwrap();
+    let mut tt: LruCache<Board, Node> = LruCache::new(capacity);
+    // let mut tt: HashMap<u64, Node> = HashMap::new();
 
     let mut vidro = Vidro::new(0);
 
-    vidro.set_ohajiki((2, 2)).unwrap();
-    vidro.set_ohajiki((0, 0)).unwrap();
-    vidro.set_ohajiki((0, 4)).unwrap();
-    vidro.set_ohajiki((2, 0)).unwrap();
-    vidro.set_ohajiki((2, 4)).unwrap();
+    // vidro.set_ohajiki((2, 2)).unwrap();
+    // vidro.set_ohajiki((0, 0)).unwrap();
+    // vidro.set_ohajiki((0, 4)).unwrap();
+    // vidro.set_ohajiki((2, 0)).unwrap();
+    // vidro.set_ohajiki((2, 4)).unwrap();
+
+    // vidro.set_ohajiki((0, 0)).unwrap();
+    // vidro.set_ohajiki((4, 4)).unwrap();
+    // vidro.set_ohajiki((0, 2)).unwrap();
+    // vidro.set_ohajiki((4, 2)).unwrap();
+    // vidro.set_ohajiki((2, 1)).unwrap();
+    // vidro.set_ohajiki((2, 3)).unwrap();
 
     let mut process = Progress::new();
-    let mut tt: HashMap<u64, Node> = HashMap::new();
     let mut route: HashSet<u64> = HashSet::new();
-    let depth = 75;
-    let result = alphabeta(
-        vidro.board,
-        depth,
-        i8::MIN,
-        i8::MAX,
-        true,
-        &mut tt,
-        &mut route,
-        &mut process,
-    );
-    println!("評価値: {}", result);
+    let depth = 50;
+
+    let mut result = EvalValue::Unknown;
+    for depth_run in 1..depth {
+        println!("depth: {}", depth_run);
+        result = alphabeta(
+            vidro.board,
+            depth_run,
+            i8::MIN,
+            i8::MAX,
+            true,
+            &mut tt,
+            &mut route,
+            &mut process,
+        );
+        if let EvalValue::Win(_) = result {
+            break;
+        }
+        route.clear(); //念のため
+    }
+    println!("評価値: {:?}", result);
 }
