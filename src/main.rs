@@ -1,6 +1,7 @@
 use Vec;
 use regex::Regex;
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::io;
 
 const ANGLES: [(isize, isize); 8] = [
@@ -25,11 +26,11 @@ pub struct Vidro {
 
 impl Vidro {
     pub fn new(board: u64) -> Vidro {
-        let mut board = board;
         let mut players_has_piece = [5; 2];
+        let mut board_count = board;
         for _ in 0..25 {
-            board >>= 2;
-            match board & 0b11 {
+            board_count >>= 2;
+            match board_count & 0b11 {
                 0b01 => players_has_piece[0] -= 1,
                 0b10 => players_has_piece[1] -= 1,
                 _ => (),
@@ -37,7 +38,7 @@ impl Vidro {
         }
         Vidro {
             board: board,
-            steps: board as usize & 0b11,
+            steps: board as usize % 2,
             prev_board: 0,
             num_player: 2, //強制的2人プレイ
             players_has_piece: players_has_piece,
@@ -73,6 +74,9 @@ impl Vidro {
     fn set_turn(&mut self, turn: u8) {
         self.board = Self::set_hash_turn(self.board, turn);
     }
+    fn next_turn(&mut self) {
+        self.set_turn(1 - self.get_now_turn());
+    }
     fn is_there_surrounding_piece(&self, ohajiki_num: u64, coord: (usize, usize)) -> bool {
         for i in 0..3 {
             for j in 0..3 {
@@ -105,8 +109,8 @@ impl Vidro {
             } else {
                 self.set_trout(coord.0, coord.1, ohajiki_num);
                 self.players_has_piece[now_turn_player] -= 1;
+                self.next_turn();
                 self.steps += 1;
-                self.set_turn(now_turn_player as u8);
                 return Ok(());
             }
         } else {
@@ -188,9 +192,9 @@ impl Vidro {
             for i in 0..5 {
                 for j in 0..5 {
                     if self.get_trout(i, j) != Vidro::get_hash_trout(self.prev_board, i, j) {
+                        self.next_turn();
                         self.steps += 1;
 
-                        self.set_turn(now_turn_player as u8);
                         //前の手を保存
                         self.prev_board = now_board.clone();
                         return Ok(());
@@ -253,6 +257,41 @@ impl Vidro {
     }
     fn get_now_turn(&self) -> u8 {
         return self.steps as u8 % self.num_player;
+    }
+    fn to_string(&self) -> String {
+        let mut vidro = self;
+        let mut buf = String::new();
+
+        buf += "now turn player: ";
+        buf += &(vidro.steps % (vidro.num_player as usize)).to_string();
+        buf += "\n";
+
+        buf += "\u{001b}[47m  0 1 2 3 4\u{001b}[0m\n";
+        for i in 0..5 {
+            buf += &i.to_string();
+
+            for j in 0..5 {
+                buf += "\u{001b}[";
+                buf += &(30 + vidro.get_trout(i, j)).to_string();
+                buf += if vidro.get_trout(i, j) == 0 {
+                    r"m  "
+                } else {
+                    r"m● "
+                };
+                buf += COLOR_RESET;
+            }
+            buf += "\n";
+        }
+
+        for i in 0..vidro.num_player {
+            buf += "player";
+            buf += &i.to_string();
+            buf += ": ";
+            buf += &vidro.players_has_piece[i as usize].to_string();
+            buf += "\n";
+        }
+
+        return buf;
     }
 }
 
@@ -508,6 +547,11 @@ fn evals_to_one_eval(turn: u8, results: &Vec<Option<i8>>) -> Eval {
     }
 }
 
+const SEARCHING_SENNICHITE_EVAL: Eval = Eval {
+    value: Some(0),
+    evaluated: true,
+};
+
 fn research(root_board: u64, nodes: usize) -> Eval {
     let root_node = Node::new(DONT_HAS_PARENT);
     let mut tt: HashMap<u64, Node> = HashMap::new();
@@ -515,16 +559,47 @@ fn research(root_board: u64, nodes: usize) -> Eval {
 
     let mut target_board = root_board;
 
+    let mut route = Vec::new(); //探索経路記録
+    route.push(target_board);
+
+    fn transition_up(route: &mut Vec<u64>) {
+        route.pop();
+    }
+
+    fn transition_down(target_board: u64, route: &mut Vec<u64>) {
+        route.push(target_board);
+    }
+
     while tt.len() < nodes {
+        println!("■now target_board: {}", target_board);
+        println!("now route: {:?}", route);
+
         //target_boardに基づきtargetのnodeをttから取得しておく
         let target_node = tt.get_mut(&target_board).unwrap();
+
+        //既に評価済みの場合
+        if target_node.eval.evaluated {
+            //親ノードへ送る
+            transition_up(&mut route); //探索枝の上昇を記録
+            if target_node.is_root() {
+                break;
+            }
+            target_board = target_node.parent;
+            //親ノードのsearch_numを増やす
+            if let Some(parent_node) = tt.get_mut(&target_board) {
+                parent_node.num_searchs += 1;
+            }
+            continue;
+        }
 
         //自己評価
         target_node.eval = win_eval(target_board);
         if target_node.eval.evaluated {
             //勝敗が確定
             //親ノードへ送る
+            transition_up(&mut route); //探索枝の上昇を記録
             if target_node.is_root() {
+                println!("break!");
                 break;
             }
             target_board = target_node.parent;
@@ -537,27 +612,51 @@ fn research(root_board: u64, nodes: usize) -> Eval {
 
         //子ノードを作っていない場合は作成
         if target_node.children.is_empty() {
-            println!("will add nodes");
-            create_children_on_node(target_board, target_node);
-
             //追加した子をttに登録
             let children = target_node.children.clone();
             let _ = target_node;
+
             for &childid in &children {
-                tt.entry(childid).or_insert_with(|| {
+                if tt.contains_key(&childid) {
+                    println!("tt already has childid: {}", childid);
+                } else {
+                    println!("tt does NOT have childid: {}", childid);
+                }
+            }
+
+            let mut new_nodes_count = 0;
+
+            for &childid in &children {
+                let entry = tt.entry(childid);
+                if let std::collections::hash_map::Entry::Vacant(e) = entry {
                     let mut node = Node::new(target_board);
                     node.eval = win_eval(childid);
-                    node
-                });
+                    e.insert(node);
+                    new_nodes_count += 1;
+                    // node.eval = win_eval(childid);
+                } else {
+                }
+                // tt.entry(childid).or_insert_with(|| {});
             }
-            println!("added nodes now nodes: {}", tt.len());
-            println!("nodes: {:#?}", tt);
+            println!("added nodes new nodes: {}", new_nodes_count);
+            println!("now nodes: {}", tt.len());
+            // println!("nodes: {:#?}", tt);
         }
         let target_node = tt.get_mut(&target_board).unwrap();
 
         if target_node.num_searchs < target_node.children.len() {
-            //子ノードへ移動
-            target_board = target_node.children[target_node.num_searchs];
+            //子ノードへ移動を試みる
+            let transition_to = target_node.children[target_node.num_searchs];
+            if route.contains(&transition_to) {
+                println!("祖先召喚をしてしまった board: {}", target_board);
+                target_node.num_searchs += 1;
+                continue;
+            } else {
+                //祖先には自分の子供が居ない
+                transition_down(transition_to, &mut route);
+                target_board = transition_to;
+                continue;
+            }
         } else {
             //子が全て探索済み
             //子を使って自己評価
@@ -573,7 +672,9 @@ fn research(root_board: u64, nodes: usize) -> Eval {
             let target_node = tt.get_mut(&target_board).unwrap();
             target_node.eval = eval_result;
             //親ノードへ送る
+            transition_up(&mut route);
             if target_node.is_root() {
+                println!("break!");
                 break;
             }
             target_board = target_node.parent;
@@ -583,13 +684,23 @@ fn research(root_board: u64, nodes: usize) -> Eval {
             }
         }
     }
+    println!("last tt: {:#?}", tt.len());
+    let a = tt.get(&root_board).unwrap();
+    println!("root: {:?}", a);
+    let children = a.children.clone();
+    for &childid in &children {
+        if let Some(child) = tt.get_mut(&childid) {
+            println!("{}", childid);
+            println!("{:#?}\n", child);
+        }
+    }
 
     return tt.get(&root_board).unwrap().eval.clone();
 }
 
 fn main() {
     println!("aaii");
-    let vidro = Vidro::new(2);
+    let vidro = Vidro::new(0);
     let result = research(vidro.board, 52);
     println!("result: {:?}", result);
     // vidro.set_ohajiki((0, 0)).unwrap();
