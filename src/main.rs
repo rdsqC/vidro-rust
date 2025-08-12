@@ -1,7 +1,6 @@
 use Vec;
 use regex::Regex;
 use std::collections::HashMap;
-use std::hash::Hash;
 use std::io;
 
 const ANGLES: [(isize, isize); 8] = [
@@ -612,6 +611,7 @@ fn research(root_board: u64, nodes: usize) -> Eval {
 
         //子ノードを作っていない場合は作成
         if target_node.children.is_empty() {
+            create_children_on_node(target_board, target_node);
             //追加した子をttに登録
             let children = target_node.children.clone();
             let _ = target_node;
