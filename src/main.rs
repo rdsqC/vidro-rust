@@ -579,9 +579,16 @@ fn alphabeta(
 
     if let Some(cached) = tt.get(&board) {
         if cached.eval.evaluated {
-            if let EvalValue::Win(v) = cached.eval.value {
-                route.remove(&board); // 探索パスから除去して戻る
-                return EvalValue::Win(v);
+            match cached.eval.value {
+                EvalValue::Win(v) => {
+                    route.remove(&board); // 探索パスから除去して戻る
+                    return EvalValue::Win(v);
+                }
+                EvalValue::Draw => {
+                    route.remove(&board); // 探索パスから除去して戻る
+                    return EvalValue::Draw;
+                }
+                _ => (),
             }
         }
     }
@@ -605,13 +612,18 @@ fn alphabeta(
     let mut beta = beta;
     let mut value;
 
+    let mut contains_unknown = false;
+
     if maximizing {
         value = i8::MIN;
         for &child in &children {
             let score = match alphabeta(child, depth - 1, alpha, beta, false, tt, route, process) {
                 EvalValue::Win(score) => score,
                 EvalValue::Draw => 0,
-                EvalValue::Unknown => continue,
+                EvalValue::Unknown => {
+                    contains_unknown = true;
+                    continue;
+                }
             };
             value = value.max(score);
             alpha = alpha.max(value);
@@ -625,7 +637,10 @@ fn alphabeta(
             let score = match alphabeta(child, depth - 1, alpha, beta, true, tt, route, process) {
                 EvalValue::Win(score) => score,
                 EvalValue::Draw => 0,
-                EvalValue::Unknown => continue,
+                EvalValue::Unknown => {
+                    contains_unknown = true;
+                    continue;
+                }
             };
             value = value.min(score);
             beta = beta.min(value);
@@ -635,11 +650,22 @@ fn alphabeta(
         }
     }
 
+    let turn = -((board % 2) as i8) * 2 + 1;
+
     let this_node_eval = match value {
-        0 => EvalValue::Draw,
         i8::MIN => EvalValue::Unknown,
         i8::MAX => EvalValue::Unknown,
-        _ => EvalValue::Win(value),
+        _ => {
+            if value == turn {
+                EvalValue::Win(turn)
+            } else if contains_unknown {
+                EvalValue::Unknown
+            } else if value == 0 {
+                EvalValue::Draw
+            } else {
+                EvalValue::Win(-turn)
+            }
+        }
     };
 
     let node = get_or_insert(tt, board);
@@ -696,7 +722,7 @@ fn main() {
 
     let mut vidro = Vidro::new(0);
 
-    // vidro.set_ohajiki((2, 2)).unwrap();
+    vidro.set_ohajiki((2, 2)).unwrap();
     // vidro.set_ohajiki((0, 0)).unwrap();
     // vidro.set_ohajiki((0, 4)).unwrap();
     // vidro.set_ohajiki((2, 0)).unwrap();
@@ -714,8 +740,8 @@ fn main() {
     let depth = 50;
 
     let mut result = EvalValue::Unknown;
+    println!("depth: {}", 0);
     for depth_run in 1..depth {
-        println!("depth: {}", depth_run);
         result = alphabeta(
             vidro.board,
             depth_run,
@@ -730,6 +756,7 @@ fn main() {
             break;
         }
         route.clear(); //念のため
+        println!("depth: {}", depth_run);
     }
     println!("評価値: {:?}", result);
 }
