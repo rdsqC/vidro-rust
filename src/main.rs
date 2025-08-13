@@ -652,13 +652,22 @@ fn alphabeta(
 
     let turn = -((board % 2) as i8) * 2 + 1;
 
+    let mut is_unknown = false;
+
     let this_node_eval = match value {
-        i8::MIN => EvalValue::Unknown,
-        i8::MAX => EvalValue::Unknown,
+        i8::MIN => {
+            is_unknown = true;
+            EvalValue::Unknown
+        }
+        i8::MAX => {
+            is_unknown = true;
+            EvalValue::Unknown
+        }
         _ => {
             if value == turn {
                 EvalValue::Win(turn)
             } else if contains_unknown {
+                is_unknown = true;
                 EvalValue::Unknown
             } else if value == 0 {
                 EvalValue::Draw
@@ -668,12 +677,14 @@ fn alphabeta(
         }
     };
 
-    let node = get_or_insert(tt, board);
-    node.children = children;
-    node.eval = Eval {
-        value: this_node_eval.clone(),
-        evaluated: true,
-    };
+    if !is_unknown {
+        let node = get_or_insert(tt, board);
+        node.children = children;
+        node.eval = Eval {
+            value: this_node_eval.clone(),
+            evaluated: true,
+        };
+    }
 
     route.remove(&board); // 探索パスから除去して戻る
 
@@ -722,7 +733,7 @@ fn main() {
 
     let mut vidro = Vidro::new(0);
 
-    vidro.set_ohajiki((2, 2)).unwrap();
+    // vidro.set_ohajiki((2, 2)).unwrap();
     // vidro.set_ohajiki((0, 0)).unwrap();
     // vidro.set_ohajiki((0, 4)).unwrap();
     // vidro.set_ohajiki((2, 0)).unwrap();
