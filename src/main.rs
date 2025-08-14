@@ -422,44 +422,38 @@ fn _play_vidro() {
 
 //ここから下は探索専用
 fn win_eval(hash: u64) -> Eval {
-    let l1 = 5;
-    let l2 = 5;
     let num_player = 2;
     let mut result: Vec<bool> = vec![false; num_player as usize];
 
-    let board = |v1: usize, v2: usize| -> u64 {
-        let result = hash;
-        result >> 2 >> 2 * (24 - (5 * v1 + v2)) & 0b11
-    };
+    let mut cells = [0u8; 25];
+    for idx in 0..25 {
+        cells[idx] = ((hash >> (2 + 2 * (24 - idx))) & 0b11) as u8;
+    }
 
-    for i in 0..l1 {
-        for j in 0..l2 {
-            if i < l1 - 2 {
-                if board(i, j) == board(i + 1, j) && board(i + 1, j) == board(i + 2, j) {
-                    if 0 < board(i, j) as usize {
-                        result[board(i, j) as usize - 1] = true;
-                    }
+    for i in 0..5 {
+        for j in 0..5 {
+            let idx = i + j * 5;
+            let c = cells[idx];
+            if c == 0 {
+                continue;
+            }
+
+            if i < 5 - 2 {
+                if c == cells[idx + 1] && c == cells[idx + 2] {
+                    result[c as usize - 1] = true;
                 }
             }
-            if j < l2 - 2 {
-                if board(i, j) == board(i, j + 1) && board(i, j + 1) == board(i, j + 2) {
-                    if 0 < board(i, j) as usize {
-                        result[board(i, j) as usize - 1] = true;
-                    }
+            if j < 5 - 2 {
+                if c == cells[idx + 5] && c == cells[idx + 10] {
+                    result[c as usize - 1] = true;
                 }
             }
-            if i < l1 - 2 && j < l2 - 2 {
-                if board(i, j) == board(i + 1, j + 1) && board(i + 1, j + 1) == board(i + 2, j + 2)
-                {
-                    if 0 < board(i, j) as usize {
-                        result[board(i, j) as usize - 1] = true;
-                    }
+            if i < 5 - 2 && j < 5 - 2 {
+                if c == cells[idx + 6] && c == cells[idx + 12] {
+                    result[c as usize - 1] = true;
                 }
-                if board(i, j + 2) == board(i + 1, j + 1) && board(i + 1, j + 1) == board(i + 2, j)
-                {
-                    if 0 < board(i, j + 2) as usize {
-                        result[board(i, j + 2) as usize - 1] = true;
-                    }
+                if c == cells[idx + 4] && c == cells[idx + 8] {
+                    result[c as usize - 1] = true;
                 }
             }
         }
@@ -480,6 +474,45 @@ fn win_eval(hash: u64) -> Eval {
         value: value,
         evaluated: evaluted,
     }
+}
+
+fn canonical_board(board: u64) -> u64 {
+    let mut result = u64::MAX;
+    for t in 0..8 {
+        let transformed = apply_transfrom(board, t);
+        result = result.min(transformed);
+    }
+    result
+}
+
+fn apply_transfrom(board: u64, t: u8) -> u64 {
+    let mut result: u64 = 0;
+    for v1 in 0..5 {
+        for v2 in 0..5 {
+            let src_index = (5 * v1 + v2) * 2;
+            let cell_bits = (board >> (src_index + 2)) & 0b11;
+
+            let (n1, n2) = {
+                let (mut n1, mut n2) = (v1, v2);
+                if t & 0b001 == 0 {
+                    n1 = 4 - n1;
+                }
+                if t & 0b010 == 0 {
+                    n2 = 4 - n2;
+                }
+                if t & 0b100 == 0 {
+                    let tmp = n1;
+                    n1 = n2;
+                    n2 = tmp;
+                }
+                (n1, n2)
+            };
+            let dst_index = (n1 * 5 + n2) * 2;
+            result |= cell_bits << (dst_index + 2);
+        }
+    }
+    result |= board & 0b11;
+    result
 }
 
 const DONT_HAS_PARENT: u64 = u64::MAX; //Nodeにおいて親を持たないことを示す特殊値とする
@@ -521,16 +554,52 @@ impl Node {
     }
 }
 
-fn create_children_on_node(target_board: u64) -> Vec<u64> {
+fn board_turn(board: u64) -> i8 {
+    (board & 0b11) as i8 * (-2) + 1
+}
+
+fn board_turn_switch(board: u64) -> u64 {
+    let mut result = board;
+    result &= !0b11;
+    result |= board & 0b11;
+    result
+}
+
+fn is_board_reach(board: u64) -> bool {
+    let board_switched_turn = board_turn_switch(board); //故意に手番を書き換え2手差しさせたときに勝利することがあるかを調べる
+    let children = create_children_on_node(board_switched_turn, false);
+    let turn = board_turn(board);
+    for &child in &children {
+        if let EvalValue::Win(value) = win_eval(child).value {
+            if value == turn {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn create_children_on_node(target_board: u64, sorting: bool) -> Vec<u64> {
     let mut children = Vec::new();
     let mut new_vidro = Vidro::new(target_board);
+
     //可能な限りの子を作成
     for i in 0..5 {
         for j in 0..5 {
             if let Ok(()) = new_vidro.set_ohajiki((i, j)) {
                 //テキトー置きが成功したとき
                 //childrenに追加
-                children.push(new_vidro.board);
+                // let new_board = (new_vidro.board);
+                let new_board = canonical_board(new_vidro.board);
+                if !children.contains(&new_board) {
+                    if sorting {
+                        if is_board_reach(new_board) {
+                            children.insert(0, new_board);
+                            continue;
+                        }
+                    }
+                    children.push(new_board);
+                }
                 new_vidro.replace(target_board); //変更が加わってしまった盤面はもういらない。新しく作りなおす。
             }
         }
@@ -541,7 +610,17 @@ fn create_children_on_node(target_board: u64) -> Vec<u64> {
                 if let Ok(()) = new_vidro.flick_ohajiki((i, j), ANGLES[a]) {
                     //テキトー置きが成功したとき
                     //childrenに追加
-                    children.push(new_vidro.board);
+                    // let new_board = (new_vidro.board);
+                    let new_board = canonical_board(new_vidro.board);
+                    if !children.contains(&new_board) {
+                        if sorting {
+                            if is_board_reach(new_board) {
+                                children.insert(0, new_board);
+                                continue;
+                            }
+                        }
+                        children.push(new_board);
+                    }
                     new_vidro.replace(target_board); //変更が加わってしまった盤面はもういらない。新しく作りなおす。
                 }
             }
@@ -558,6 +637,15 @@ fn get_or_insert(tt: &mut LruCache<u64, Node>, board: u64) -> &mut Node {
         tt.get_mut(&board).unwrap()
     }
 }
+
+// fn run_search(board: u64, depth: usize) -> EvalValue {
+//     let (alpha, beta) = (i8::MIN, i8::MAX);
+//     let maximizing = board & 0b1 == 0;
+//     let capacity = NonZeroUsize::new(1_000_000).unwrap();
+//     let mut tt: LruCache<Board, Node> = LruCache::new(capacity);
+//     let mut route: HashSet<u64> = HashSet::new();
+//     alphabeta(board, depth, alpha, beta, maximizing, &mut tt, &mut route)
+// }
 
 fn alphabeta(
     board: u64,
@@ -606,7 +694,7 @@ fn alphabeta(
         return eval;
     }
 
-    let children = create_children_on_node(board);
+    let children = create_children_on_node(board, false);
 
     let mut alpha = alpha;
     let mut beta = beta;
