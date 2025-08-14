@@ -787,7 +787,7 @@ fn main() {
     // };
     // let result = research(vidro.board, num_nodes);
     // println!("result: {:?}", result);
-    let capacity = NonZeroUsize::new(1_000_000).unwrap();
+    let capacity = NonZeroUsize::new(10_000_000).unwrap();
     let mut tt: LruCache<Vidro, Node> = LruCache::new(capacity);
     // let mut tt: HashMap<u64, Node> = HashMap::new();
 
