@@ -18,47 +18,43 @@ const ANGLES: [(isize, isize); 8] = [
     (1, 1),
 ];
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Hash, Eq)]
 pub struct Vidro {
-    board: u64,
+    turn: u8,
     steps: usize,
-    prev_board: u64,
+    prev_board: [u8; 25],
     num_player: u8,
     players_has_piece: [u8; 2],
+    board_data: [u8; 25],
 }
 
 impl Vidro {
     pub fn new(board: u64) -> Vidro {
         let mut players_has_piece = [5; 2];
-        let mut board_count = board;
-        for _ in 0..25 {
-            board_count >>= 2;
-            match board_count & 0b11 {
+        let mut scan_board = board;
+        let mut board_data = [0u8; 25];
+        for idx in 0..25usize {
+            scan_board >>= 2;
+            let cell = scan_board & 0b11;
+            board_data[idx] = cell as u8;
+            match cell {
                 0b01 => players_has_piece[0] -= 1,
                 0b10 => players_has_piece[1] -= 1,
                 _ => (),
             }
         }
+
         Vidro {
-            board: board,
+            turn: board as u8 & 0b11,
+            board_data,
             steps: board as usize % 2,
-            prev_board: 0,
+            prev_board: [0; 25],
             num_player: 2, //強制的2人プレイ
             players_has_piece: players_has_piece,
         }
     }
     fn replace(&mut self, board: u64) {
         *self = Self::new(board);
-    }
-    fn get_trout(&self, v1: usize, v2: usize) -> u64 {
-        let result = self.board;
-        result >> 2 >> 2 * (24 - (5 * v1 + v2)) & 0b11
-    }
-    fn set_trout(&mut self, v1: usize, v2: usize, value: u64) {
-        let mask: u64 = !(0b11 << 2 << 2 * (24 - (5 * v1 + v2)));
-        let set_bit = (value & 0b11) << 2 << 2 * (24 - (5 * v1 + v2));
-        self.board &= mask;
-        self.board |= set_bit;
     }
     pub fn get_hash_trout(hash: u64, v1: usize, v2: usize) -> u64 {
         let result = hash;
@@ -75,12 +71,12 @@ impl Vidro {
         result
     }
     fn set_turn(&mut self, turn: u8) {
-        self.board = Self::set_hash_turn(self.board, turn);
+        self.turn = turn;
     }
     fn next_turn(&mut self) {
-        self.set_turn(1 - self.get_now_turn());
+        self.turn = 1 - self.turn;
     }
-    fn is_there_surrounding_piece(&self, ohajiki_num: u64, coord: (usize, usize)) -> bool {
+    fn is_there_surrounding_piece(&self, ohajiki_num: u8, coord: (usize, usize)) -> bool {
         for i in 0..3 {
             for j in 0..3 {
                 if coord.0 as isize + i - 1 < 0
@@ -90,10 +86,10 @@ impl Vidro {
                 {
                     continue;
                 }
-                if self.get_trout(
-                    (coord.0 as isize + i) as usize - 1,
-                    (coord.1 as isize + j) as usize - 1,
-                ) == ohajiki_num
+                if self.board_data[5 * ((coord.0 as isize + i) as usize - 1)
+                    + (coord.1 as isize + j) as usize
+                    - 1]
+                    == ohajiki_num
                 {
                     return true;
                 }
@@ -103,14 +99,14 @@ impl Vidro {
     }
     fn set_ohajiki(&mut self, coord: (usize, usize)) -> Result<(), &'static str> {
         //プレイヤーについている数字+1をそのプレイヤーの石として設計している。
-        let now_turn_player = self.get_now_turn() as usize;
+        let now_turn_player = self.turn as usize;
         let ohajiki_num = (now_turn_player + 1).try_into().unwrap();
 
         if 0 < self.players_has_piece[now_turn_player] {
             if self.is_there_surrounding_piece(ohajiki_num, coord) {
                 return Err("周りに既に石があります");
             } else {
-                self.set_trout(coord.0, coord.1, ohajiki_num);
+                self.board_data[coord.0 * 5 + coord.1] = ohajiki_num;
                 self.players_has_piece[now_turn_player] -= 1;
                 self.next_turn();
                 self.steps += 1;
@@ -125,12 +121,12 @@ impl Vidro {
         coord: (usize, usize),
         angle: (isize, isize),
     ) -> Result<(), &'static str> {
-        let now_turn_player = self.get_now_turn() as usize;
-        let ohajiki_num: u64 = (now_turn_player + 1).try_into().unwrap();
+        let now_turn_player = self.turn as usize;
+        let ohajiki_num: u8 = (now_turn_player + 1).try_into().unwrap();
 
-        let now_board = self.board.clone();
+        let now_board = self.board_data.clone();
 
-        let mut target = self.get_trout(coord.0, coord.1);
+        let mut target = self.board_data[coord.0 * 5 + coord.1];
         let mut target_coord: (isize, isize) = (coord.0 as isize, coord.1 as isize);
 
         if target != ohajiki_num {
@@ -152,17 +148,17 @@ impl Vidro {
                 let u_next = (next.0 as usize, next.1 as usize);
                 let u_target_coord = (target_coord.0 as usize, target_coord.1 as usize);
 
-                match self.get_trout(u_next.0, u_next.1) {
+                match self.board_data[u_next.0 * 5 + u_next.1] {
                     0 => {
                         //移動先に何もない場合
-                        self.set_trout(u_next.0, u_next.1, target);
-                        self.set_trout(u_target_coord.0, u_target_coord.1, 0);
+                        self.board_data[u_next.0 * 5 + u_next.1] = target;
+                        self.board_data[u_target_coord.0 * 5 + u_target_coord.1] = 0;
                         target_coord = next;
                     }
                     _ => {
                         //移動先に駒がある場合
                         target_coord = next;
-                        target = self.get_trout(u_next.0, u_next.1);
+                        target = self.board_data[u_next.0 * 5 + u_next.1];
                     }
                 }
             }
@@ -177,7 +173,7 @@ impl Vidro {
                 let mut is_all = true;
                 for i in 0..5 {
                     for j in 0..5 {
-                        if self.get_trout(i, j) != Vidro::get_hash_trout(now_board, i, j) {
+                        if self.board_data[i * 5 + j] != now_board[i * 5 + j] {
                             is_all = false;
                             break;
                         }
@@ -194,7 +190,7 @@ impl Vidro {
             //千日手の防止
             for i in 0..5 {
                 for j in 0..5 {
-                    if self.get_trout(i, j) != Vidro::get_hash_trout(self.prev_board, i, j) {
+                    if self.board_data[i * 5 + j] != self.prev_board[i * 5 + j] {
                         self.next_turn();
                         self.steps += 1;
 
@@ -208,58 +204,45 @@ impl Vidro {
             for i in 0..5 {
                 //元の盤面に戻す
                 for j in 0..5 {
-                    self.set_trout(i, j, Vidro::get_hash_trout(now_board, i, j));
+                    self.board_data[i * 5 + j] = now_board[i * 5 + j];
                 }
             }
             return Err("千日手です");
         }
     }
     fn winners(&self) -> Vec<bool> {
-        let l1 = 5;
-        let l2 = 5;
-        let mut result: Vec<bool> = vec![false; self.num_player as usize];
-        for i in 0..l1 {
-            for j in 0..l2 {
-                if i < l1 - 2 {
-                    if self.get_trout(i, j) == self.get_trout(i + 1, j)
-                        && self.get_trout(i + 1, j) == self.get_trout(i + 2, j)
-                    {
-                        if 0 < self.get_trout(i, j) as usize {
-                            result[self.get_trout(i, j) as usize - 1] = true;
-                        }
+        let num_player = 2;
+        let mut result: Vec<bool> = vec![false; num_player as usize];
+
+        for i in 0..5 {
+            for j in 0..5 {
+                let idx = i + j * 5;
+                let c = self.board_data[idx];
+                if c == 0 {
+                    continue;
+                }
+
+                if i < 5 - 2 {
+                    if c == self.board_data[idx + 1] && c == self.board_data[idx + 2] {
+                        result[c as usize - 1] = true;
                     }
                 }
-                if j < l2 - 2 {
-                    if self.get_trout(i, j) == self.get_trout(i, j + 1)
-                        && self.get_trout(i, j + 1) == self.get_trout(i, j + 2)
-                    {
-                        if 0 < self.get_trout(i, j) as usize {
-                            result[self.get_trout(i, j) as usize - 1] = true;
-                        }
+                if j < 5 - 2 {
+                    if c == self.board_data[idx + 5] && c == self.board_data[idx + 10] {
+                        result[c as usize - 1] = true;
                     }
                 }
-                if i < l1 - 2 && j < l2 - 2 {
-                    if self.get_trout(i, j) == self.get_trout(i + 1, j + 1)
-                        && self.get_trout(i + 1, j + 1) == self.get_trout(i + 2, j + 2)
-                    {
-                        if 0 < self.get_trout(i, j) as usize {
-                            result[self.get_trout(i, j) as usize - 1] = true;
-                        }
+                if i < 5 - 2 && j < 5 - 2 {
+                    if c == self.board_data[idx + 6] && c == self.board_data[idx + 12] {
+                        result[c as usize - 1] = true;
                     }
-                    if self.get_trout(i, j + 2) == self.get_trout(i + 1, j + 1)
-                        && self.get_trout(i + 1, j + 1) == self.get_trout(i + 2, j)
-                    {
-                        if 0 < self.get_trout(i, j + 2) as usize {
-                            result[self.get_trout(i, j + 2) as usize - 1] = true;
-                        }
+                    if c == self.board_data[idx + 4] && c == self.board_data[idx + 8] {
+                        result[c as usize - 1] = true;
                     }
                 }
             }
         }
         result
-    }
-    fn get_now_turn(&self) -> u8 {
-        return self.steps as u8 % self.num_player;
     }
     fn _to_string(&self) -> String {
         let vidro = self;
@@ -275,8 +258,8 @@ impl Vidro {
 
             for j in 0..5 {
                 buf += "\u{001b}[";
-                buf += &(30 + vidro.get_trout(i, j)).to_string();
-                buf += if vidro.get_trout(i, j) == 0 {
+                buf += &(30 + vidro.board_data[i * 5 + j]).to_string();
+                buf += if vidro.board_data[i * 5 + j] == 0 {
                     r"m  "
                 } else {
                     r"m● "
@@ -309,7 +292,7 @@ fn read_buffer() -> String {
 const COLOR_RESET: &str = "\u{001b}[0m";
 
 fn _play_vidro() {
-    let mut vidro = Vidro::new(2);
+    let mut vidro = Vidro::new(0);
     let mut buf = String::new();
 
     let set_re = Regex::new(r"s\s+(\d+)\s+(\d+)").unwrap();
@@ -333,8 +316,8 @@ fn _play_vidro() {
 
             for j in 0..5 {
                 buf += "\u{001b}[";
-                buf += &(30 + vidro.get_trout(i, j)).to_string();
-                buf += if vidro.get_trout(i, j) == 0 {
+                buf += &(30 + vidro.board_data[i * 5 + j]).to_string();
+                buf += if vidro.board_data[i * 5 + j] == 0 {
                     r"m  "
                 } else {
                     r"m● "
@@ -421,14 +404,11 @@ fn _play_vidro() {
 }
 
 //ここから下は探索専用
-fn win_eval(hash: u64) -> Eval {
+fn win_eval(vidro: &Vidro) -> Eval {
     let num_player = 2;
     let mut result: Vec<bool> = vec![false; num_player as usize];
 
-    let mut cells = [0u8; 25];
-    for idx in 0..25 {
-        cells[idx] = ((hash >> (2 + 2 * (24 - idx))) & 0b11) as u8;
-    }
+    let cells = &vidro.board_data;
 
     for i in 0..5 {
         for j in 0..5 {
@@ -476,42 +456,40 @@ fn win_eval(hash: u64) -> Eval {
     }
 }
 
-fn canonical_board(board: u64) -> u64 {
-    let mut result = u64::MAX;
-    for t in 0..8 {
-        let transformed = apply_transfrom(board, t);
-        result = result.min(transformed);
+fn canonical_board(board: &mut [u8; 25]) {
+    for t in 1..8 {
+        //0の場合は無変更になるため実行しない
+        let mut transformed = apply_transfrom(&board, t);
+        if board.cmp(&&mut transformed).is_lt() {
+            board.copy_from_slice(&transformed);
+        };
     }
-    result
 }
 
-fn apply_transfrom(board: u64, t: u8) -> u64 {
-    let mut result: u64 = 0;
+fn apply_transfrom(board_data: &[u8; 25], t: u8) -> [u8; 25] {
+    let mut result = [0u8; 25];
     for v1 in 0..5 {
         for v2 in 0..5 {
-            let src_index = (5 * v1 + v2) * 2;
-            let cell_bits = (board >> (src_index + 2)) & 0b11;
+            let src_index = 5 * v1 + v2;
 
-            let (n1, n2) = {
+            let dst_index = {
                 let (mut n1, mut n2) = (v1, v2);
-                if t & 0b001 == 0 {
+                if t & 0b001 == 1 {
                     n1 = 4 - n1;
                 }
-                if t & 0b010 == 0 {
+                if t & 0b010 == 1 {
                     n2 = 4 - n2;
                 }
-                if t & 0b100 == 0 {
+                if t & 0b100 == 1 {
                     let tmp = n1;
                     n1 = n2;
                     n2 = tmp;
                 }
-                (n1, n2)
+                n1 * 5 + n2
             };
-            let dst_index = (n1 * 5 + n2) * 2;
-            result |= cell_bits << (dst_index + 2);
+            result[dst_index] = board_data[src_index];
         }
     }
-    result |= board & 0b11;
     result
 }
 
@@ -558,30 +536,35 @@ fn board_turn(board: u64) -> i8 {
     (board & 0b11) as i8 * (-2) + 1
 }
 
-fn board_turn_switch(board: u64) -> u64 {
-    let mut result = board;
-    result &= !0b11;
-    result |= board & 0b11;
-    result
-}
-
-fn is_board_reach(board: u64) -> bool {
-    let board_switched_turn = board_turn_switch(board); //故意に手番を書き換え2手差しさせたときに勝利することがあるかを調べる
-    let children = create_children_on_node(board_switched_turn, false);
-    let turn = board_turn(board);
-    for &child in &children {
+fn is_board_reach(board: &Vidro) -> i8 {
+    let mut vidro = board.clone();
+    vidro.next_turn(); //故意に手番を書き換え2手差しさせたときに勝利することがあるかを調べる
+    let children = create_children_on_node(&vidro, false);
+    let turn = -(vidro.turn as i8) * 2 + 1;
+    for child in &children {
         if let EvalValue::Win(value) = win_eval(child).value {
             if value == turn {
-                return true;
+                return value;
             }
         }
     }
-    false
+    return 0;
 }
 
-fn create_children_on_node(target_board: u64, sorting: bool) -> Vec<u64> {
-    let mut children = Vec::new();
-    let mut new_vidro = Vidro::new(target_board);
+fn quick_eval(board: &Vidro) -> i8 {
+    is_board_reach(board)
+}
+
+fn order_children(children: &mut Vec<Vidro>, turn: u8) {
+    children.sort_by_key(|board| {
+        let val = quick_eval(board);
+        if turn == 0 { -val } else { val }
+    });
+}
+
+fn create_children_on_node(target_board: &Vidro, sorting: bool) -> Vec<Vidro> {
+    let mut children: HashSet<Vidro> = HashSet::new();
+    let mut new_vidro = target_board.clone();
 
     //可能な限りの子を作成
     for i in 0..5 {
@@ -590,17 +573,9 @@ fn create_children_on_node(target_board: u64, sorting: bool) -> Vec<u64> {
                 //テキトー置きが成功したとき
                 //childrenに追加
                 // let new_board = (new_vidro.board);
-                let new_board = canonical_board(new_vidro.board);
-                if !children.contains(&new_board) {
-                    if sorting {
-                        if is_board_reach(new_board) {
-                            children.insert(0, new_board);
-                            continue;
-                        }
-                    }
-                    children.push(new_board);
-                }
-                new_vidro.replace(target_board); //変更が加わってしまった盤面はもういらない。新しく作りなおす。
+                canonical_board(&mut new_vidro.board_data);
+                children.insert(new_vidro);
+                new_vidro = target_board.clone(); //変更が加わってしまった盤面はもういらない。新しく作りなおす。
             }
         }
     }
@@ -611,29 +586,25 @@ fn create_children_on_node(target_board: u64, sorting: bool) -> Vec<u64> {
                     //テキトー置きが成功したとき
                     //childrenに追加
                     // let new_board = (new_vidro.board);
-                    let new_board = canonical_board(new_vidro.board);
-                    if !children.contains(&new_board) {
-                        if sorting {
-                            if is_board_reach(new_board) {
-                                children.insert(0, new_board);
-                                continue;
-                            }
-                        }
-                        children.push(new_board);
-                    }
-                    new_vidro.replace(target_board); //変更が加わってしまった盤面はもういらない。新しく作りなおす。
+                    canonical_board(&mut new_vidro.board_data);
+                    children.insert(new_vidro);
+                    new_vidro = target_board.clone(); //変更が加わってしまった盤面はもういらない。新しく作りなおす。
                 }
             }
         }
     }
-    children
+    let mut result: Vec<Vidro> = children.into_iter().collect();
+    if sorting {
+        order_children(&mut result, target_board.turn);
+    }
+    result
 }
 
-fn get_or_insert(tt: &mut LruCache<u64, Node>, board: u64) -> &mut Node {
+fn get_or_insert(tt: &mut LruCache<Vidro, Node>, board: Vidro) -> &mut Node {
     if tt.contains(&board) {
         tt.get_mut(&board).unwrap()
     } else {
-        tt.put(board, Node::new(DONT_HAS_PARENT));
+        tt.put(board.clone(), Node::new(DONT_HAS_PARENT));
         tt.get_mut(&board).unwrap()
     }
 }
@@ -648,13 +619,13 @@ fn get_or_insert(tt: &mut LruCache<u64, Node>, board: u64) -> &mut Node {
 // }
 
 fn alphabeta(
-    board: u64,
+    board: &Vidro,
     depth: usize,
     alpha: i8,
     beta: i8,
     maximizing: bool,
-    tt: &mut LruCache<Board, Node>,
-    route: &mut HashSet<u64>,
+    tt: &mut LruCache<Vidro, Node>,
+    route: &mut HashSet<Vidro>,
     process: &mut Progress,
 ) -> EvalValue {
     process.update(depth, tt.len());
@@ -663,9 +634,9 @@ fn alphabeta(
     if route.contains(&board) {
         return EvalValue::Draw; //引き分け評価
     }
-    route.insert(board);
+    route.insert(board.clone());
 
-    if let Some(cached) = tt.get(&board) {
+    if let Some(cached) = tt.get(board) {
         if cached.eval.evaluated {
             match cached.eval.value {
                 EvalValue::Win(v) => {
@@ -685,7 +656,7 @@ fn alphabeta(
     let eval = win_eval(board);
     if eval.evaluated || depth == 0 {
         let eval = eval.value;
-        get_or_insert(tt, board).eval = Eval {
+        get_or_insert(tt, board.clone()).eval = Eval {
             value: eval.clone(),
             evaluated: true,
         };
@@ -704,8 +675,8 @@ fn alphabeta(
 
     if maximizing {
         value = i8::MIN;
-        for &child in &children {
-            let score = match alphabeta(child, depth - 1, alpha, beta, false, tt, route, process) {
+        for child in &children {
+            let score = match alphabeta(&child, depth - 1, alpha, beta, false, tt, route, process) {
                 EvalValue::Win(score) => score,
                 EvalValue::Draw => 0,
                 EvalValue::Unknown => {
@@ -721,8 +692,8 @@ fn alphabeta(
         }
     } else {
         value = i8::MAX;
-        for &child in &children {
-            let score = match alphabeta(child, depth - 1, alpha, beta, true, tt, route, process) {
+        for child in &children {
+            let score = match alphabeta(&child, depth - 1, alpha, beta, true, tt, route, process) {
                 EvalValue::Win(score) => score,
                 EvalValue::Draw => 0,
                 EvalValue::Unknown => {
@@ -738,7 +709,7 @@ fn alphabeta(
         }
     }
 
-    let turn = -((board % 2) as i8) * 2 + 1;
+    let turn = -(board.turn as i8) * 2 + 1;
 
     let mut is_unknown = false;
 
@@ -766,8 +737,7 @@ fn alphabeta(
     };
 
     if !is_unknown {
-        let node = get_or_insert(tt, board);
-        node.children = children;
+        let node = get_or_insert(tt, board.clone());
         node.eval = Eval {
             value: this_node_eval.clone(),
             evaluated: true,
@@ -808,6 +778,8 @@ impl Progress {
 type Board = u64;
 
 fn main() {
+    // _play_vidro();
+    // return;
     // println!("aaii");
     // let num_nodes = {
     //     let a: usize = 2;
@@ -816,7 +788,7 @@ fn main() {
     // let result = research(vidro.board, num_nodes);
     // println!("result: {:?}", result);
     let capacity = NonZeroUsize::new(1_000_000).unwrap();
-    let mut tt: LruCache<Board, Node> = LruCache::new(capacity);
+    let mut tt: LruCache<Vidro, Node> = LruCache::new(capacity);
     // let mut tt: HashMap<u64, Node> = HashMap::new();
 
     let mut vidro = Vidro::new(0);
@@ -835,14 +807,14 @@ fn main() {
     // vidro.set_ohajiki((2, 3)).unwrap();
 
     let mut process = Progress::new();
-    let mut route: HashSet<u64> = HashSet::new();
+    let mut route: HashSet<Vidro> = HashSet::new();
     let depth = 50;
 
     let mut result = EvalValue::Unknown;
     println!("depth: {}", 0);
     for depth_run in 1..depth {
         result = alphabeta(
-            vidro.board,
+            &vidro,
             depth_run,
             i8::MIN,
             i8::MAX,
