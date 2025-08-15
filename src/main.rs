@@ -554,7 +554,7 @@ fn is_board_reach(board: &Vidro) -> i8 {
 }
 
 fn quick_eval(board: &Vidro) -> i8 {
-    is_board_reach(board)
+    board.players_has_piece[1] as i8 - board.players_has_piece[0] as i8
 }
 
 fn order_children(children: &mut Vec<Vidro>, turn: u8) {
@@ -667,7 +667,7 @@ fn alphabeta(
         return eval;
     }
 
-    let children = create_children_on_node(board, false);
+    let children = create_children_on_node(board, true);
 
     let mut alpha = alpha;
     let mut beta = beta;
