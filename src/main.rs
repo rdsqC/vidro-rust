@@ -529,7 +529,11 @@ fn is_board_reach(board: &Vidro) -> i8 {
 }
 
 fn quick_eval(board: &Vidro) -> i8 {
-    board.players_has_piece[1] as i8 - board.players_has_piece[0] as i8
+    let mut eval1 = 0i8;
+    for i in 0..9 {
+        eval1 += board.board_data[(i % 3) * 2 + (i / 3) * 10] as i8 * (-2) + 3; //角と辺の中央の評価をあげる
+    }
+    (board.players_has_piece[1] as i8 - board.players_has_piece[0] as i8) + eval1
 }
 
 fn order_children(children: &mut Vec<Vidro>, turn: u8) {
@@ -731,7 +735,7 @@ impl Progress {
     fn update(&mut self, current_depth: usize, tt_size: usize, board: &Vidro) {
         self.nodes_searched += 1;
         let now = Instant::now();
-        if now.duration_since(self.last_print) >= Duration::from_secs(1) {
+        if now.duration_since(self.last_print) >= Duration::from_secs(10) {
             println!(
                 "探索ノード数: {}, 現在深さ: {}, TTサイズ: {}",
                 self.nodes_searched, current_depth, tt_size
