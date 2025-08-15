@@ -460,6 +460,59 @@ lazy_static! {
 }
 
 //ここから下は探索専用
+fn win_eval_bit_shift(vidro: &Vidro) -> Eval {
+    let mut player_bits = [0u64; 2];
+    for row in 0..5 {
+        for col in 0..5 {
+            let idx = row * 5 + col;
+            let bit_pos = row * 7 + col; //余白bitを2つ用意
+            let c = vidro.board_data[idx];
+            if c != 0 {
+                player_bits[c as usize - 1] |= 1 << bit_pos;
+            }
+        }
+    }
+
+    let mut result = [false; 2];
+    for p in 0..2 {
+        let b = player_bits[p];
+
+        //一列が7になっていることに注意する
+        //横
+        if (b & (b >> 1) & (b >> 2)) != 0 {
+            result[p] = true;
+        }
+
+        //縦
+        if (b & (b >> 7) & (b >> 14)) != 0 {
+            result[p] = true;
+        }
+
+        //右下斜め
+        if (b & (b >> 8) & (b >> 16)) != 0 {
+            result[p] = true;
+        }
+
+        //左下斜め
+        if (b & (b >> 6) & (b >> 12)) != 0 {
+            result[p] = true;
+        }
+    }
+
+    let eval: i8 = if result[0] { 1 } else { 0 } + if result[1] { -1 } else { 0 };
+    let evaluated = result[0] || result[1];
+    let value = if evaluated {
+        if eval == 0 {
+            EvalValue::Draw
+        } else {
+            EvalValue::Win(eval)
+        }
+    } else {
+        EvalValue::Unknown
+    };
+    Eval { value, evaluated }
+}
+
 fn win_eval_bit(vidro: &Vidro) -> Eval {
     let mut player_bits = [0u32; 2];
 
@@ -634,7 +687,7 @@ fn is_board_reach(board: &Vidro) -> i8 {
     let children = create_children_on_node(&vidro, false);
     let turn = -(vidro.turn as i8) * 2 + 1;
     for child in &children {
-        if let EvalValue::Win(value) = win_eval_bit(child).value {
+        if let EvalValue::Win(value) = win_eval_bit_shift(child).value {
             if value == turn {
                 return value;
             }
@@ -733,7 +786,7 @@ fn alphabeta(
     }
 
     //自己評価
-    let eval = win_eval_bit(board);
+    let eval = win_eval_bit_shift(board);
     if eval.evaluated || depth == 0 {
         let eval = eval.value;
         tt.put(
@@ -862,9 +915,6 @@ impl Progress {
 }
 
 fn main() {
-    for mask in WIN_MASKS.iter() {
-        println!("{:025b}", mask);
-    }
     // _play_vidro();
     // return;
     // println!("aaii");
