@@ -409,9 +409,59 @@ fn _play_vidro() {
         }
     }
 }
+
+fn generate_win_masks() -> Vec<u32> {
+    let mut masks = Vec::new();
+
+    //横
+    for row in 0..5 {
+        for col in 0..3 {
+            let mask = 0b111 << (row * 5 + col);
+            masks.push(mask);
+        }
+    }
+
+    //縦
+    for col in 0..5 {
+        for row in 0..3 {
+            let mask = (1 << (row * 5 + col))
+                | (1 << ((row + 1) * 5 + col))
+                | (1 << ((row + 2) * 5 + col));
+            masks.push(mask);
+        }
+    }
+
+    // 斜め
+    // 右下斜め
+    for row in 0..3 {
+        for col in 0..3 {
+            let mask = (1 << (row * 5 + col))
+                | (1 << ((row + 1) * 5 + (col + 1)))
+                | (1 << ((row + 2) * 5 + (col + 2)));
+            masks.push(mask);
+        }
+    }
+    // 左下斜め
+    for row in 0..3 {
+        for col in 2..5 {
+            let mask = (1 << (row * 5 + col))
+                | (1 << ((row + 1) * 5 + (col - 1)))
+                | (1 << ((row + 2) * 5 + (col - 2)));
+            masks.push(mask);
+        }
+    }
+
+    masks
+}
+
+use lazy_static::lazy_static;
+lazy_static! {
+    static ref WIN_MASKS: Vec<u32> = generate_win_masks();
+}
+
 //ここから下は探索専用
 fn win_eval_bit(vidro: &Vidro) -> Eval {
-    let mut player_bits = [0u32, 2];
+    let mut player_bits = [0u32; 2];
 
     for idx in 0..25 {
         let c = vidro.board_data[idx];
@@ -420,68 +470,13 @@ fn win_eval_bit(vidro: &Vidro) -> Eval {
         }
     }
 
-    //横
-    fn check_horizontal(bits: u32) -> bool {
-        for row in 0..5 {
-            for col in 0..3 {
-                let mask = 0b111 << (row * 5 + col);
-                if bits & mask == mask {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    //縦
-    fn check_vertical(bits: u32) -> bool {
-        for col in 0..5 {
-            for row in 0..3 {
-                let mask = (1 << (row * 5 + col))
-                    | (1 << ((row + 1) * 5 + col))
-                    | (1 << ((row + 2) * 5 + col));
-                if bits & mask == mask {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    // 斜め
-    fn check_diagonal(bits: u32) -> bool {
-        // 右下斜め
-        for row in 0..3 {
-            for col in 0..3 {
-                let mask = (1 << (row * 5 + col))
-                    | (1 << ((row + 1) * 5 + (col + 1)))
-                    | (1 << ((row + 2) * 5 + (col + 2)));
-                if bits & mask == mask {
-                    return true;
-                }
-            }
-        }
-        // 左下斜め
-        for row in 0..3 {
-            for col in 2..5 {
-                let mask = (1 << (row * 5 + col))
-                    | (1 << ((row + 1) * 5 + (col - 1)))
-                    | (1 << ((row + 2) * 5 + (col - 2)));
-                if bits & mask == mask {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
     let mut result = [false; 2];
     for p in 0..2 {
-        if check_horizontal(player_bits[p])
-            || check_vertical(player_bits[p])
-            || check_diagonal(player_bits[p])
-        {
-            result[p] = true;
+        for &mask in WIN_MASKS.iter() {
+            if player_bits[p] & mask == mask {
+                result[p] = true;
+                break;
+            }
         }
     }
     let eval: i8 = if result[0] { 1 } else { 0 } + if result[1] { -1 } else { 0 };
@@ -867,6 +862,9 @@ impl Progress {
 }
 
 fn main() {
+    for mask in WIN_MASKS.iter() {
+        println!("{:025b}", mask);
+    }
     // _play_vidro();
     // return;
     // println!("aaii");

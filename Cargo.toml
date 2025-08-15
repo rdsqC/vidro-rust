@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 regex = "1.11.1"
 lru = "0.8"
+lazy_static = "1.4"
