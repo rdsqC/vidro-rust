@@ -409,8 +409,94 @@ fn _play_vidro() {
         }
     }
 }
-
 //ここから下は探索専用
+fn win_eval_bit(vidro: &Vidro) -> Eval {
+    let mut player_bits = [0u32, 2];
+
+    for idx in 0..25 {
+        let c = vidro.board_data[idx];
+        if c != 0 {
+            player_bits[c as usize - 1] |= 1 << idx;
+        }
+    }
+
+    //横
+    fn check_horizontal(bits: u32) -> bool {
+        for row in 0..5 {
+            for col in 0..3 {
+                let mask = 0b111 << (row * 5 + col);
+                if bits & mask == mask {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn check_vertical(bits: u32) -> bool {
+        for col in 0..5 {
+            for row in 0..3 {
+                let mask = (1 << (row * 5 + col))
+                    | (1 << ((row + 1) * 5 + col))
+                    | (1 << ((row + 2) * 5 + col));
+                if bits & mask == mask {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    // 斜め
+    fn check_diagonal(bits: u32) -> bool {
+        // 右下斜め
+        for row in 0..3 {
+            for col in 0..3 {
+                let mask = (1 << (row * 5 + col))
+                    | (1 << ((row + 1) * 5 + (col + 1)))
+                    | (1 << ((row + 2) * 5 + (col + 2)));
+                if bits & mask == mask {
+                    return true;
+                }
+            }
+        }
+        // 左下斜め
+        for row in 0..3 {
+            for col in 2..5 {
+                let mask = (1 << (row * 5 + col))
+                    | (1 << ((row + 1) * 5 + (col - 1)))
+                    | (1 << ((row + 2) * 5 + (col - 2)));
+                if bits & mask == mask {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    let mut result = [false; 2];
+    for p in 0..2 {
+        if check_horizontal(player_bits[p])
+            || check_vertical(player_bits[p])
+            || check_diagonal(player_bits[p])
+        {
+            result[p] = true;
+        }
+    }
+    let eval: i8 = if result[0] { 1 } else { 0 } + if result[1] { -1 } else { 0 };
+    let evaluated = result[0] || result[1];
+    let value = if evaluated {
+        if eval == 0 {
+            EvalValue::Draw
+        } else {
+            EvalValue::Win(eval)
+        }
+    } else {
+        EvalValue::Unknown
+    };
+    Eval { value, evaluated }
+}
+
 fn win_eval(vidro: &Vidro) -> Eval {
     let mut result = [false; 2];
 
@@ -552,7 +638,7 @@ fn is_board_reach(board: &Vidro) -> i8 {
     let children = create_children_on_node(&vidro, false);
     let turn = -(vidro.turn as i8) * 2 + 1;
     for child in &children {
-        if let EvalValue::Win(value) = win_eval(child).value {
+        if let EvalValue::Win(value) = win_eval_bit(child).value {
             if value == turn {
                 return value;
             }
@@ -624,7 +710,7 @@ fn alphabeta(
     route: &mut HashSet<Vidro>,
     process: &mut Progress,
 ) -> EvalValue {
-    // process.update(depth, tt.len(), board);
+    process.update(depth, tt.len(), board);
 
     //千日手判定
     if route.contains(&board) {
@@ -651,7 +737,7 @@ fn alphabeta(
     }
 
     //自己評価
-    let eval = win_eval(board);
+    let eval = win_eval_bit(board);
     if eval.evaluated || depth == 0 {
         let eval = eval.value;
         tt.put(
