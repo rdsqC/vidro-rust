@@ -433,6 +433,7 @@ fn win_eval_bit(vidro: &Vidro) -> Eval {
         false
     }
 
+    //縦
     fn check_vertical(bits: u32) -> bool {
         for col in 0..5 {
             for row in 0..3 {
