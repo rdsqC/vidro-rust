@@ -2,10 +2,9 @@ use Vec;
 use lru::LruCache;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
+use std::io;
 use std::num::NonZeroUsize;
-use std::sync::atomic::AtomicUsize;
 use std::time::{Duration, Instant};
-use std::{io, result};
 
 const ANGLES: [(isize, isize); 8] = [
     (0, 1),
@@ -52,9 +51,6 @@ impl Vidro {
             num_player: 2, //強制的2人プレイ
             players_has_piece: players_has_piece,
         }
-    }
-    fn replace(&mut self, board: u64) {
-        *self = Self::new(board);
     }
     pub fn get_hash_trout(hash: u64, v1: usize, v2: usize) -> u64 {
         let result = hash;
@@ -504,8 +500,6 @@ fn apply_transfrom(board_data: &[u8; 25], t: u8) -> [u8; 25] {
     result
 }
 
-const DONT_HAS_PARENT: u64 = u64::MAX; //Nodeにおいて親を持たないことを示す特殊値とする
-
 #[derive(Clone, Debug)]
 enum EvalValue {
     Win(i8),
@@ -517,34 +511,6 @@ enum EvalValue {
 struct Eval {
     value: EvalValue,
     evaluated: bool, //評価済みかどうか
-}
-
-struct Node {
-    eval: Eval,
-    parent: u64,
-    children: Vec<u64>,
-    num_searchs: usize,
-}
-
-impl Node {
-    pub fn new(parent: u64) -> Self {
-        Node {
-            eval: Eval {
-                value: EvalValue::Unknown,
-                evaluated: false,
-            },
-            parent: parent,
-            children: vec![],
-            num_searchs: 0,
-        }
-    }
-    fn is_root(&self) -> bool {
-        self.parent == DONT_HAS_PARENT
-    }
-}
-
-fn board_turn(board: u64) -> i8 {
-    (board & 0b11) as i8 * (-2) + 1
 }
 
 fn is_board_reach(board: &Vidro) -> i8 {
@@ -611,31 +577,13 @@ fn create_children_on_node(target_board: &Vidro, sorting: bool) -> Vec<Vidro> {
     result
 }
 
-fn get_or_insert(tt: &mut LruCache<u64, Node>, hash: u64) -> &mut Node {
-    if tt.contains(&hash) {
-        tt.get_mut(&hash).unwrap()
-    } else {
-        tt.put(hash, Node::new(DONT_HAS_PARENT));
-        tt.get_mut(&hash).unwrap()
-    }
-}
-
-// fn run_search(board: u64, depth: usize) -> EvalValue {
-//     let (alpha, beta) = (i8::MIN, i8::MAX);
-//     let maximizing = board & 0b1 == 0;
-//     let capacity = NonZeroUsize::new(1_000_000).unwrap();
-//     let mut tt: LruCache<Board, Node> = LruCache::new(capacity);
-//     let mut route: HashSet<u64> = HashSet::new();
-//     alphabeta(board, depth, alpha, beta, maximizing, &mut tt, &mut route)
-// }
-
 fn alphabeta(
     board: &Vidro,
     depth: usize,
     alpha: i8,
     beta: i8,
     maximizing: bool,
-    tt: &mut LruCache<u64, Node>,
+    tt: &mut LruCache<u64, Eval>,
     route: &mut HashSet<Vidro>,
     process: &mut Progress,
 ) -> EvalValue {
@@ -650,8 +598,8 @@ fn alphabeta(
     let hash = board.to_hash();
 
     if let Some(cached) = tt.get(&hash) {
-        if cached.eval.evaluated {
-            match cached.eval.value {
+        if cached.evaluated {
+            match cached.value {
                 EvalValue::Win(v) => {
                     route.remove(&board); // 探索パスから除去して戻る
                     return EvalValue::Win(v);
@@ -669,10 +617,13 @@ fn alphabeta(
     let eval = win_eval(board);
     if eval.evaluated || depth == 0 {
         let eval = eval.value;
-        get_or_insert(tt, hash).eval = Eval {
-            value: eval.clone(),
-            evaluated: true,
-        };
+        tt.put(
+            hash,
+            Eval {
+                value: eval.clone(),
+                evaluated: true,
+            },
+        );
 
         route.remove(&board); // 探索パスから除去して戻る
         return eval;
@@ -750,11 +701,13 @@ fn alphabeta(
     };
 
     if !is_unknown {
-        let node = get_or_insert(tt, hash);
-        node.eval = Eval {
-            value: this_node_eval.clone(),
-            evaluated: true,
-        };
+        tt.put(
+            hash,
+            Eval {
+                value: this_node_eval.clone(),
+                evaluated: true,
+            },
+        );
     }
 
     route.remove(&board); // 探索パスから除去して戻る
@@ -789,8 +742,6 @@ impl Progress {
     }
 }
 
-type Board = u64;
-
 fn main() {
     // _play_vidro();
     // return;
@@ -802,7 +753,7 @@ fn main() {
     // let result = research(vidro.board, num_nodes);
     // println!("result: {:?}", result);
     let capacity = NonZeroUsize::new(10_000_000).unwrap();
-    let mut tt: LruCache<u64, Node> = LruCache::new(capacity);
+    let mut tt: LruCache<u64, Eval> = LruCache::new(capacity);
     // let mut tt: HashMap<u64, Node> = HashMap::new();
 
     let mut vidro = Vidro::new(0);
