@@ -462,20 +462,52 @@ fn win_eval(vidro: &Vidro) -> Eval {
     }
 }
 
-fn canonical_board(board: &mut [u8; 25]) {
-    for t in 1..8 {
-        //0の場合は無変更になるため実行しない
-        let mut transformed = apply_transfrom(&board, t);
-        if board.cmp(&&mut transformed).is_lt() {
-            board.copy_from_slice(&transformed);
-        };
+const BOARD_SIZE: usize = 5;
+const NUM_CELLS: usize = BOARD_SIZE * BOARD_SIZE;
+
+const TRANSFORMS: [[usize; NUM_CELLS]; 8] = generate_transforms();
+
+const fn generate_transforms() -> [[usize; NUM_CELLS]; 8] {
+    let mut result = [[0usize; 25]; 8];
+    let mut t = 0;
+    while t < 8 {
+        let mut base_map = [0u8; NUM_CELLS];
+        let mut i = 0;
+        while i < NUM_CELLS {
+            base_map[i] = i as u8;
+            i += 1;
+        }
+        let transformed = apply_transfrom(&base_map, t as u8);
+        let mut j = 0;
+        while j < NUM_CELLS {
+            result[t][j] = transformed[j] as usize;
+            j += 1;
+        }
+        t += 1;
     }
+    result
 }
 
-fn apply_transfrom(board_data: &[u8; 25], t: u8) -> [u8; 25] {
+fn canonical_board(board: &mut [u8; NUM_CELLS]) {
+    let mut min_board = *board;
+    for map in &TRANSFORMS {
+        let mut transformed = [0u8; NUM_CELLS];
+        for i in 0..NUM_CELLS {
+            transformed[i] = board[map[i]];
+        }
+        if transformed < min_board {
+            min_board = transformed;
+        }
+    }
+    *board = min_board;
+}
+
+const fn apply_transfrom(board_data: &[u8; 25], t: u8) -> [u8; 25] {
     let mut result = [0u8; 25];
-    for v1 in 0..5 {
-        for v2 in 0..5 {
+    let mut v1 = 0;
+    while v1 < BOARD_SIZE {
+        let mut v2 = 0;
+        while v2 < BOARD_SIZE {
             let src_index = 5 * v1 + v2;
 
             let dst_index = {
@@ -494,7 +526,9 @@ fn apply_transfrom(board_data: &[u8; 25], t: u8) -> [u8; 25] {
                 n1 * 5 + n2
             };
             result[dst_index] = board_data[src_index];
+            v2 += 1;
         }
+        v1 += 1;
     }
     result
 }
@@ -590,7 +624,7 @@ fn alphabeta(
     route: &mut HashSet<Vidro>,
     process: &mut Progress,
 ) -> EvalValue {
-    process.update(depth, tt.len(), board);
+    // process.update(depth, tt.len(), board);
 
     //千日手判定
     if route.contains(&board) {
@@ -755,7 +789,7 @@ fn main() {
     // };
     // let result = research(vidro.board, num_nodes);
     // println!("result: {:?}", result);
-    let capacity = NonZeroUsize::new(10_000_000).unwrap();
+    let capacity = NonZeroUsize::new(100_000_000).unwrap();
     let mut tt: LruCache<u64, Eval> = LruCache::new(capacity);
     // let mut tt: HashMap<u64, Node> = HashMap::new();
 
