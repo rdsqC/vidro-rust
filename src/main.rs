@@ -412,8 +412,7 @@ fn _play_vidro() {
 
 //ここから下は探索専用
 fn win_eval(vidro: &Vidro) -> Eval {
-    let num_player = 2;
-    let mut result: Vec<bool> = vec![false; num_player as usize];
+    let mut result = [false; 2];
 
     let cells = &vidro.board_data;
 
