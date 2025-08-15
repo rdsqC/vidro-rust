@@ -281,6 +281,15 @@ impl Vidro {
 
         return buf;
     }
+    fn to_hash(&self) -> u64 {
+        let mut hash = 0u64;
+        for &trout_state in &self.board_data {
+            hash += trout_state as u64;
+            hash <<= 2;
+        }
+        hash += self.turn as u64;
+        hash
+    }
 }
 
 fn read_buffer() -> String {
@@ -602,12 +611,12 @@ fn create_children_on_node(target_board: &Vidro, sorting: bool) -> Vec<Vidro> {
     result
 }
 
-fn get_or_insert(tt: &mut LruCache<Vidro, Node>, board: Vidro) -> &mut Node {
-    if tt.contains(&board) {
-        tt.get_mut(&board).unwrap()
+fn get_or_insert(tt: &mut LruCache<u64, Node>, hash: u64) -> &mut Node {
+    if tt.contains(&hash) {
+        tt.get_mut(&hash).unwrap()
     } else {
-        tt.put(board.clone(), Node::new(DONT_HAS_PARENT));
-        tt.get_mut(&board).unwrap()
+        tt.put(hash, Node::new(DONT_HAS_PARENT));
+        tt.get_mut(&hash).unwrap()
     }
 }
 
@@ -626,7 +635,7 @@ fn alphabeta(
     alpha: i8,
     beta: i8,
     maximizing: bool,
-    tt: &mut LruCache<Vidro, Node>,
+    tt: &mut LruCache<u64, Node>,
     route: &mut HashSet<Vidro>,
     process: &mut Progress,
 ) -> EvalValue {
@@ -638,7 +647,9 @@ fn alphabeta(
     }
     route.insert(board.clone());
 
-    if let Some(cached) = tt.get(board) {
+    let hash = board.to_hash();
+
+    if let Some(cached) = tt.get(&hash) {
         if cached.eval.evaluated {
             match cached.eval.value {
                 EvalValue::Win(v) => {
@@ -658,7 +669,7 @@ fn alphabeta(
     let eval = win_eval(board);
     if eval.evaluated || depth == 0 {
         let eval = eval.value;
-        get_or_insert(tt, board.clone()).eval = Eval {
+        get_or_insert(tt, hash).eval = Eval {
             value: eval.clone(),
             evaluated: true,
         };
@@ -739,7 +750,7 @@ fn alphabeta(
     };
 
     if !is_unknown {
-        let node = get_or_insert(tt, board.clone());
+        let node = get_or_insert(tt, hash);
         node.eval = Eval {
             value: this_node_eval.clone(),
             evaluated: true,
@@ -791,7 +802,7 @@ fn main() {
     // let result = research(vidro.board, num_nodes);
     // println!("result: {:?}", result);
     let capacity = NonZeroUsize::new(10_000_000).unwrap();
-    let mut tt: LruCache<Vidro, Node> = LruCache::new(capacity);
+    let mut tt: LruCache<u64, Node> = LruCache::new(capacity);
     // let mut tt: HashMap<u64, Node> = HashMap::new();
 
     let mut vidro = Vidro::new(0);
