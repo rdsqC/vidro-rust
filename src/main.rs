@@ -630,7 +630,7 @@ fn alphabeta(
     route: &mut HashSet<Vidro>,
     process: &mut Progress,
 ) -> EvalValue {
-    process.update(depth, tt.len());
+    process.update(depth, tt.len(), board);
 
     //千日手判定
     if route.contains(&board) {
@@ -764,14 +764,15 @@ impl Progress {
         }
     }
 
-    fn update(&mut self, current_depth: usize, tt_size: usize) {
+    fn update(&mut self, current_depth: usize, tt_size: usize, board: &Vidro) {
         self.nodes_searched += 1;
         let now = Instant::now();
-        if now.duration_since(self.last_print) >= Duration::from_secs(10) {
+        if now.duration_since(self.last_print) >= Duration::from_secs(1) {
             println!(
                 "探索ノード数: {}, 現在深さ: {}, TTサイズ: {}",
                 self.nodes_searched, current_depth, tt_size
             );
+            println!("{}", board._to_string());
             self.last_print = now;
         }
     }
