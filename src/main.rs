@@ -102,7 +102,9 @@ impl Vidro {
         let now_turn_player = self.turn as usize;
         let ohajiki_num = (now_turn_player + 1).try_into().unwrap();
 
-        if 0 < self.players_has_piece[now_turn_player] {
+        if self.board_data[coord.0 * 5 + coord.1] != 0 {
+            return Err("既に石があります");
+        } else if 0 < self.players_has_piece[now_turn_player] {
             if self.is_there_surrounding_piece(ohajiki_num, coord) {
                 return Err("周りに既に石があります");
             } else {
