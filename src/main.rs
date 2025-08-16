@@ -210,6 +210,100 @@ impl Vidro {
         self.steps += 1;
         return Ok(());
     }
+    fn flick_ohajiki(
+        &mut self,
+        coord: (usize, usize),
+        angle: (isize, isize),
+    ) -> Result<(), &'static str> {
+        let now_turn_player = self.turn as usize;
+        let ohajiki_num: u8 = (now_turn_player + 1).try_into().unwrap();
+
+        let now_board = self.board_data.clone();
+
+        let mut target = self.board_data[coord.0 * 5 + coord.1];
+        let mut target_coord: (isize, isize) = (coord.0 as isize, coord.1 as isize);
+
+        if target != ohajiki_num {
+            return Err("他人の駒をはじくことはできません");
+        }
+
+        let mut next: (isize, isize); //default 処理中での移動先の座標を示す。
+
+        let mut roops = 0;
+
+        while target != 0 {
+            roops += 1;
+
+            next = (target_coord.0 + angle.0, target_coord.1 + angle.1);
+
+            if next.0 < 0 || 5 as isize <= next.0 || next.1 < 0 || 5 as isize <= next.1 {
+                target = 0;
+            } else {
+                let u_next = (next.0 as usize, next.1 as usize);
+                let u_target_coord = (target_coord.0 as usize, target_coord.1 as usize);
+
+                match self.board_data[u_next.0 * 5 + u_next.1] {
+                    0 => {
+                        //移動先に何もない場合
+                        self.board_data[u_next.0 * 5 + u_next.1] = target;
+                        self.board_data[u_target_coord.0 * 5 + u_target_coord.1] = 0;
+                        target_coord = next;
+                    }
+                    _ => {
+                        //移動先に駒がある場合
+                        target_coord = next;
+                        target = self.board_data[u_next.0 * 5 + u_next.1];
+                    }
+                }
+            }
+        }
+
+        if roops == 0 {
+            //なにも駒がうごかないはじきは禁止
+            return Err("その手はできません");
+        } else {
+            //駒が動かないはじきを禁止
+            {
+                let mut is_all = true;
+                for i in 0..5 {
+                    for j in 0..5 {
+                        if self.board_data[i * 5 + j] != now_board[i * 5 + j] {
+                            is_all = false;
+                            break;
+                        }
+                    }
+                    if !is_all {
+                        break;
+                    }
+                }
+                if is_all {
+                    return Err("駒が動かないはじきはできません");
+                }
+            }
+
+            //千日手の防止
+            for i in 0..5 {
+                for j in 0..5 {
+                    if self.board_data[i * 5 + j] != self.prev_board[i * 5 + j] {
+                        self.next_turn();
+                        self.steps += 1;
+
+                        //前の手を保存
+                        self.prev_board = now_board.clone();
+                        return Ok(());
+                    }
+                }
+            }
+            //千日手の制約に引っかかる場合
+            for i in 0..5 {
+                //元の盤面に戻す
+                for j in 0..5 {
+                    self.board_data[i * 5 + j] = now_board[i * 5 + j];
+                }
+            }
+            return Err("千日手です");
+        }
+    }
     fn winners(&self) -> Vec<bool> {
         let num_player = 2;
         let mut result: Vec<bool> = vec![false; num_player as usize];
