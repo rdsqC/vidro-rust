@@ -249,6 +249,12 @@ impl Vidro {
         hash += self.turn as u64;
         hash
     }
+    fn apply_move(&mut self, mv: &Move) -> Result<(), &'static str> {
+        match mv {
+            Move::Place { r, c } => self.set_ohajiki((*r, *c)),
+            Move::Flick { r, c, angle_idx } => self.flick_ohajiki_fast(*r, *c, *angle_idx),
+        }
+    }
     fn create_legal_moves(&self) {
         let mut legal_moves: Vec<Move> = Vec::new();
         //set_ohajiki
