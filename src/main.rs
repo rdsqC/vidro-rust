@@ -116,6 +116,25 @@ impl Vidro {
         }
         false
     }
+    fn set_ohajiki_force(&mut self, coord: (usize, usize)) {
+        let now_turn_player = self.turn as usize;
+        let ohajiki_num = (now_turn_player + 1).try_into().unwrap();
+        self.prev_board = self.board_data;
+
+        //スナップショット保存
+        self.board_histroy.push(Snapshot {
+            turn: self.turn,
+            steps: self.steps,
+            players_has_piece: self.players_has_piece,
+            board_data: self.board_data,
+        });
+
+        //変更
+        self.board_data[coord.0 * 5 + coord.1] = ohajiki_num;
+        self.players_has_piece[now_turn_player] -= 1;
+        self.next_turn();
+        self.steps += 1;
+    }
     fn set_ohajiki(&mut self, coord: (usize, usize)) -> Result<(), &'static str> {
         //プレイヤーについている数字+1をそのプレイヤーの石として設計している。
         let now_turn_player = self.turn as usize;
@@ -148,31 +167,7 @@ impl Vidro {
             return Err("もう置く石がありません");
         }
     }
-    fn flick_ohajiki_fast(&mut self, r: usize, c: usize, adix: usize) -> Result<(), &'static str> {
-        let mut map: Vec<usize> = Vec::new();
-        let angle = ANGLES[adix];
-        {
-            let mut mr = r as isize;
-            let mut mc = c as isize;
-            while (0 <= mr && mr < 5) && (0 <= mc && mc < 5) {
-                map.push((mr * 5 + mc) as usize);
-                mr += angle.0 as isize;
-                mc += angle.1 as isize;
-            }
-        }
-
-        //駒が動かないはじきを禁止1
-        if map.len() < 2 {
-            return Err("駒が動かないはじきはできません");
-        }
-
-        //現在ターンの人の駒でない駒を弾こうとしている場合はルール上除外する
-        if self.board_data[map[0]] != self.turn + 1 {
-            return Err("他人の駒をはじくことはできません");
-        }
-
-        let s = self._to_string();
-
+    fn flick_ohajiki_force(&mut self, coord: (usize, usize), angle: (isize, isize)) {
         //スナップショット保存
         let snapshot_before_change = Snapshot {
             turn: self.turn,
@@ -181,38 +176,45 @@ impl Vidro {
             board_data: self.board_data,
         };
 
-        //変更
-        let mut isnt_ohajiki_moved = true;
-        for idx in 0..map.len() - 1 {
-            if self.board_data[map[idx + 1]] == 0 {
-                isnt_ohajiki_moved = false;
-                self.board_data[map[idx + 1]] = self.board_data[map[idx]];
-                self.board_data[map[idx]] = 0;
-            }
-        }
+        let now_board = self.board_data.clone();
 
-        //駒が動かないはじきを禁止2
-        if isnt_ohajiki_moved {
-            return Err("駒が動かないはじきはできません");
-        }
+        let mut target = self.board_data[coord.0 * 5 + coord.1];
+        let mut target_coord: (isize, isize) = (coord.0 as isize, coord.1 as isize);
 
-        //千日手判定
-        if 2 <= self.board_histroy.len() {
-            if let Some(prev_board) = self.board_histroy.last() {
-                //まだスナップショットを保存していないため配列の最後がこの手が実行される盤面の前の情報を示している
-                if self.board_data == prev_board.board_data {
-                    self.board_data = self.board_histroy[self.board_histroy.len() - 1].board_data;
-                    return Err("千日手です");
+        let mut next: (isize, isize); //default 処理中での移動先の座標を示す。
+
+        while target != 0 {
+            next = (target_coord.0 + angle.0, target_coord.1 + angle.1);
+
+            if next.0 < 0 || 5 as isize <= next.0 || next.1 < 0 || 5 as isize <= next.1 {
+                target = 0;
+            } else {
+                let u_next = (next.0 as usize, next.1 as usize);
+                let u_target_coord = (target_coord.0 as usize, target_coord.1 as usize);
+
+                match self.board_data[u_next.0 * 5 + u_next.1] {
+                    0 => {
+                        //移動先に何もない場合
+                        self.board_data[u_next.0 * 5 + u_next.1] = target;
+                        self.board_data[u_target_coord.0 * 5 + u_target_coord.1] = 0;
+                        target_coord = next;
+                    }
+                    _ => {
+                        //移動先に駒がある場合
+                        target_coord = next;
+                        target = self.board_data[u_next.0 * 5 + u_next.1];
+                    }
                 }
             }
         }
-        // println!("--flick satrt--\n{}", s);
-        // println!("--flick end--\n{}", self._to_string());
 
-        self.board_histroy.push(snapshot_before_change);
         self.next_turn();
         self.steps += 1;
-        return Ok(());
+
+        //前の手を保存
+        self.prev_board = now_board;
+        //スナップショット保存
+        self.board_histroy.push(snapshot_before_change);
     }
     fn flick_ohajiki(
         &mut self,
@@ -396,6 +398,14 @@ impl Vidro {
         }
         hash += self.turn as u64;
         hash
+    }
+    fn apply_move_force(&mut self, mv: &Move) {
+        match mv {
+            Move::Place { r, c } => self.set_ohajiki_force((*r, *c)),
+            Move::Flick { r, c, angle_idx } => {
+                self.flick_ohajiki_force((*r, *c), ANGLES[*angle_idx])
+            }
+        }
     }
     fn apply_move(&mut self, mv: &Move) -> Result<(), &'static str> {
         match mv {
@@ -872,6 +882,8 @@ fn create_legal_moves(target_board: &mut Vidro) -> Vec<Move> {
     return movable;
 }
 
+const USE_CACHE: bool = false;
+
 fn alphabeta(
     board: &mut Vidro,
     depth: usize,
@@ -892,18 +904,20 @@ fn alphabeta(
     }
     route.push(hash);
 
-    if let Some(cached) = tt.get(&hash) {
-        if cached.evaluated {
-            match cached.value {
-                EvalValue::Win(v) => {
-                    route.pop(); // 探索パスから除去して戻る
-                    return EvalValue::Win(v);
+    if USE_CACHE {
+        if let Some(cached) = tt.get(&hash) {
+            if cached.evaluated {
+                match cached.value {
+                    EvalValue::Win(v) => {
+                        route.pop(); // 探索パスから除去して戻る
+                        return EvalValue::Win(v);
+                    }
+                    EvalValue::Draw => {
+                        route.pop(); // 探索パスから除去して戻る
+                        return EvalValue::Draw;
+                    }
+                    _ => (),
                 }
-                EvalValue::Draw => {
-                    route.pop(); // 探索パスから除去して戻る
-                    return EvalValue::Draw;
-                }
-                _ => (),
             }
         }
     }
@@ -912,13 +926,15 @@ fn alphabeta(
     let eval = win_eval_bit_shift(board);
     if eval.evaluated || depth == 0 {
         let eval = eval.value;
-        tt.put(
-            hash,
-            Eval {
-                value: eval.clone(),
-                evaluated: true,
-            },
-        );
+        if USE_CACHE {
+            tt.put(
+                hash,
+                Eval {
+                    value: eval.clone(),
+                    evaluated: true,
+                },
+            );
+        }
 
         route.pop(); // 探索パスから除去して戻る
         return eval;
@@ -936,51 +952,47 @@ fn alphabeta(
         value = i8::MIN;
         for mv in &moves {
             //手を実行
-            if let Ok(()) = board.apply_move(mv) {
-                //その手ができた場合
-                let score =
-                    match alphabeta(board, depth - 1, alpha, beta, false, tt, route, process) {
-                        EvalValue::Win(score) => score,
-                        EvalValue::Draw => 0,
-                        EvalValue::Unknown => {
-                            contains_unknown = true;
-                            board.undo_move(&mv).unwrap(); //元に戻す
-                            continue;
-                        }
-                    };
-                value = value.max(score);
-                alpha = alpha.max(value);
-                if alpha >= beta {
+            board.apply_move_force(mv);
+            //その手ができた場合
+            let score = match alphabeta(board, depth - 1, alpha, beta, false, tt, route, process) {
+                EvalValue::Win(score) => score,
+                EvalValue::Draw => 0,
+                EvalValue::Unknown => {
+                    contains_unknown = true;
                     board.undo_move(&mv).unwrap(); //元に戻す
-                    break;
+                    continue;
                 }
+            };
+            value = value.max(score);
+            alpha = alpha.max(value);
+            if alpha >= beta {
                 board.undo_move(&mv).unwrap(); //元に戻す
+                break;
             }
+            board.undo_move(&mv).unwrap(); //元に戻す
         }
     } else {
         value = i8::MAX;
         for mv in &moves {
             //手を実行
-            if let Ok(()) = board.apply_move(mv) {
-                //その手ができた場合
-                let score = match alphabeta(board, depth - 1, alpha, beta, true, tt, route, process)
-                {
-                    EvalValue::Win(score) => score,
-                    EvalValue::Draw => 0,
-                    EvalValue::Unknown => {
-                        contains_unknown = true;
-                        board.undo_move(&mv).unwrap(); //元に戻す
-                        continue;
-                    }
-                };
-                value = value.min(score);
-                beta = beta.min(value);
-                if beta <= alpha {
+            board.apply_move_force(mv);
+            //その手ができた場合
+            let score = match alphabeta(board, depth - 1, alpha, beta, true, tt, route, process) {
+                EvalValue::Win(score) => score,
+                EvalValue::Draw => 0,
+                EvalValue::Unknown => {
+                    contains_unknown = true;
                     board.undo_move(&mv).unwrap(); //元に戻す
-                    break;
+                    continue;
                 }
+            };
+            value = value.min(score);
+            beta = beta.min(value);
+            if beta <= alpha {
                 board.undo_move(&mv).unwrap(); //元に戻す
+                break;
             }
+            board.undo_move(&mv).unwrap(); //元に戻す
         }
     }
 
@@ -1011,14 +1023,16 @@ fn alphabeta(
         }
     };
 
-    if !is_unknown {
-        tt.put(
-            hash,
-            Eval {
-                value: this_node_eval.clone(),
-                evaluated: true,
-            },
-        );
+    if USE_CACHE {
+        if !is_unknown {
+            tt.put(
+                hash,
+                Eval {
+                    value: this_node_eval.clone(),
+                    evaluated: true,
+                },
+            );
+        }
     }
 
     route.pop(); // 探索パスから除去して戻る
@@ -1054,7 +1068,7 @@ impl Progress {
 }
 
 fn main() {
-    let capacity = NonZeroUsize::new(10_000).unwrap();
+    let capacity = NonZeroUsize::new(1000).unwrap();
     let mut tt: LruCache<u64, Eval> = LruCache::new(capacity);
 
     let mut vidro = Vidro::new(0);
