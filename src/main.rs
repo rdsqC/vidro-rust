@@ -17,7 +17,7 @@ const ANGLES: [(isize, isize); 8] = [
     (1, 1),
 ];
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq)]
 enum Move {
     Place {
         r: usize,
@@ -30,14 +30,22 @@ enum Move {
     },
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Snapshot {
+    turn: u8,
+    steps: usize,
+    players_has_piece: [u8; 2],
+    board_data: [u8; 25],
+}
+
+#[derive(PartialEq, Eq)]
 pub struct Vidro {
     turn: u8,
     steps: usize,
     num_player: u8,
     players_has_piece: [u8; 2],
     board_data: [u8; 25],
-    board_histroy: Vec<[u8; 25]>,
+    board_histroy: Vec<Snapshot>,
 }
 
 impl Vidro {
@@ -117,11 +125,19 @@ impl Vidro {
             if self.is_there_surrounding_piece(ohajiki_num, coord) {
                 return Err("周りに既に石があります");
             } else {
+                //スナップショット保存
+                self.board_histroy.push(Snapshot {
+                    turn: self.turn,
+                    steps: self.steps,
+                    players_has_piece: self.players_has_piece,
+                    board_data: self.board_data,
+                });
+
+                //変更
                 self.board_data[coord.0 * 5 + coord.1] = ohajiki_num;
                 self.players_has_piece[now_turn_player] -= 1;
                 self.next_turn();
                 self.steps += 1;
-                self.board_histroy.push(self.board_data);
                 return Ok(());
             }
         } else {
@@ -131,7 +147,6 @@ impl Vidro {
     fn flick_ohajiki_fast(&mut self, r: usize, c: usize, adix: usize) -> Result<(), &'static str> {
         let mut map: Vec<usize> = Vec::new();
         let angle = ANGLES[adix];
-        let now_board = self.board_data;
         {
             let mut mr = r as isize;
             let mut mc = c as isize;
@@ -142,7 +157,7 @@ impl Vidro {
             }
         }
 
-        //駒が動かないはじきを禁止
+        //駒が動かないはじきを禁止1
         if map.len() < 2 {
             return Err("駒が動かないはじきはできません");
         }
@@ -152,22 +167,45 @@ impl Vidro {
             return Err("他人の駒をはじくことはできません");
         }
 
+        let s = self._to_string();
+
+        //スナップショット保存
+        let snapshot_before_change = Snapshot {
+            turn: self.turn,
+            steps: self.steps,
+            players_has_piece: self.players_has_piece,
+            board_data: self.board_data,
+        };
+
+        //変更
+        let mut isnt_ohajiki_moved = true;
         for idx in 0..map.len() - 1 {
             if self.board_data[map[idx + 1]] == 0 {
+                isnt_ohajiki_moved = false;
                 self.board_data[map[idx + 1]] = self.board_data[map[idx]];
                 self.board_data[map[idx]] = 0;
             }
         }
 
-        //千日手判定
-        if let Some(prev_board) = self.board_histroy.get(self.board_histroy.len() - 2) {
-            if self.board_data == *prev_board {
-                self.board_data = now_board;
-                return Err("千日手です");
-            }
+        //駒が動かないはじきを禁止2
+        if isnt_ohajiki_moved {
+            return Err("駒が動かないはじきはできません");
         }
 
-        self.board_histroy.push(self.board_data);
+        //千日手判定
+        if 2 <= self.board_histroy.len() {
+            if let Some(prev_board) = self.board_histroy.last() {
+                //まだスナップショットを保存していないため配列の最後がこの手が実行される盤面の前の情報を示している
+                if self.board_data == prev_board.board_data {
+                    self.board_data = self.board_histroy[self.board_histroy.len() - 1].board_data;
+                    return Err("千日手です");
+                }
+            }
+        }
+        // println!("--flick satrt--\n{}", s);
+        // println!("--flick end--\n{}", self._to_string());
+
+        self.board_histroy.push(snapshot_before_change);
         self.next_turn();
         self.steps += 1;
         return Ok(());
@@ -256,34 +294,15 @@ impl Vidro {
             Move::Flick { r, c, angle_idx } => self.flick_ohajiki_fast(*r, *c, *angle_idx),
         }
     }
-    fn undo_move(&mut self, mv: &Move) -> Result<(), &'static str> {
-        if 0 < self.board_histroy.len() {
-            self.board_data = self.board_histroy.pop().unwrap();
+    fn undo_move(&mut self, _mv: &Move) -> Result<(), &'static str> {
+        if let Some(s) = self.board_histroy.pop() {
+            self.turn = s.turn;
+            self.steps = s.steps;
+            self.players_has_piece = s.players_has_piece;
+            self.board_data = s.board_data;
             Ok(())
         } else {
             Err("以前の盤面データはありません。")
-        }
-    }
-    fn create_legal_moves(&self) {
-        let mut legal_moves: Vec<Move> = Vec::new();
-        //set_ohajiki
-        for r in 0..5 {
-            for c in 0..5 {
-                let now_turn_player = self.turn as usize;
-                let ohajiki_num = (now_turn_player + 1).try_into().unwrap();
-
-                if self.board_data[r * 5 + c] != 0 {
-                    continue;
-                } else if 0 < self.players_has_piece[now_turn_player] {
-                    if self.is_there_surrounding_piece(ohajiki_num, (r, c)) {
-                        continue;
-                    } else {
-                        legal_moves.push(Move::Place { r, c });
-                    }
-                } else {
-                    continue;
-                }
-            }
         }
     }
 }
@@ -680,21 +699,21 @@ struct Eval {
     value: EvalValue,
     evaluated: bool, //評価済みかどうか
 }
-
-fn is_board_reach(board: &Vidro) -> i8 {
-    let mut vidro = board.clone();
-    vidro.next_turn(); //故意に手番を書き換え2手差しさせたときに勝利することがあるかを調べる
-    let children = create_children_on_node(&vidro, false);
-    let turn = -(vidro.turn as i8) * 2 + 1;
-    for child in &children {
-        if let EvalValue::Win(value) = win_eval_bit_shift(child).value {
-            if value == turn {
-                return value;
-            }
-        }
-    }
-    return 0;
-}
+//
+// fn is_board_reach(board: &Vidro) -> i8 {
+//     let mut vidro = board.clone();
+//     vidro.next_turn(); //故意に手番を書き換え2手差しさせたときに勝利することがあるかを調べる
+//     let children = create_children_on_node(&vidro, false);
+//     let turn = -(vidro.turn as i8) * 2 + 1;
+//     for child in &children {
+//         if let EvalValue::Win(value) = win_eval_bit_shift(child).value {
+//             if value == turn {
+//                 return value;
+//             }
+//         }
+//     }
+//     return 0;
+// }
 
 fn quick_eval(board: &Vidro) -> i8 {
     let mut eval1 = 0i8;
@@ -711,60 +730,56 @@ fn order_children(children: &mut Vec<Vidro>, turn: u8) {
     });
 }
 
-fn create_children_on_node(target_board: &Vidro, sorting: bool) -> Vec<Vidro> {
-    let mut children: HashSet<Vidro> = HashSet::new();
-    let mut new_vidro = target_board.clone();
+fn create_legal_moves(target_board: &mut Vidro) -> Vec<Move> {
+    let mut movable: Vec<Move> = Vec::new();
 
     //可能な限りの子を作成
     for i in 0..5 {
         for j in 0..5 {
-            if let Ok(()) = new_vidro.set_ohajiki((i, j)) {
+            if let Ok(()) = target_board.set_ohajiki((i, j)) {
                 //テキトー置きが成功したとき
-                //childrenに追加
-                // let new_board = (new_vidro.board);
-                canonical_board(&mut new_vidro.board_data);
-                children.insert(new_vidro);
-                new_vidro = target_board.clone(); //変更が加わってしまった盤面はもういらない。新しく作りなおす。
+                let mv = Move::Place { r: i, c: j };
+                target_board.undo_move(&mv).unwrap(); //変更が加わってしまった盤面を元に戻す
+                movable.push(mv);
             }
         }
     }
     for i in 0..5 {
         for j in 0..5 {
             for a in 0..8 {
-                if let Ok(()) = new_vidro.flick_ohajiki_fast(i, j, a) {
+                if let Ok(()) = target_board.flick_ohajiki_fast(i, j, a) {
                     //テキトー置きが成功したとき
-                    //childrenに追加
-                    canonical_board(&mut new_vidro.board_data);
-                    children.insert(new_vidro);
-                    new_vidro = target_board.clone(); //変更が加わってしまった盤面はもういらない。新しく作りなおす。
+                    let mv = Move::Flick {
+                        r: i,
+                        c: j,
+                        angle_idx: a,
+                    };
+                    target_board.undo_move(&mv).unwrap(); //変更が加わってしまった盤面を元に戻す
+                    movable.push(mv);
                 }
             }
         }
     }
-    let mut result: Vec<Vidro> = children.into_iter().collect();
-    if sorting {
-        order_children(&mut result, target_board.turn);
-    }
-    result
+    return movable;
 }
 
 fn alphabeta(
-    board: &Vidro,
+    board: &mut Vidro,
     depth: usize,
     alpha: i8,
     beta: i8,
     maximizing: bool,
     tt: &mut LruCache<u64, Eval>,
-    route: &mut HashSet<Vidro>,
+    route: &mut HashSet<u64>,
     process: &mut Progress,
 ) -> EvalValue {
     process.update(depth, tt.len(), board);
 
     //千日手判定
-    if route.contains(&board) {
+    if route.contains(&board.to_hash()) {
         return EvalValue::Draw; //引き分け評価
     }
-    route.insert(board.clone());
+    route.insert(board.to_hash());
 
     let hash = board.to_hash();
 
@@ -772,11 +787,11 @@ fn alphabeta(
         if cached.evaluated {
             match cached.value {
                 EvalValue::Win(v) => {
-                    route.remove(&board); // 探索パスから除去して戻る
+                    route.remove(&board.to_hash()); // 探索パスから除去して戻る
                     return EvalValue::Win(v);
                 }
                 EvalValue::Draw => {
-                    route.remove(&board); // 探索パスから除去して戻る
+                    route.remove(&board.to_hash()); // 探索パスから除去して戻る
                     return EvalValue::Draw;
                 }
                 _ => (),
@@ -796,11 +811,11 @@ fn alphabeta(
             },
         );
 
-        route.remove(&board); // 探索パスから除去して戻る
+        route.remove(&board.to_hash()); // 探索パスから除去して戻る
         return eval;
     }
 
-    let children = create_children_on_node(board, true);
+    let moves = create_legal_moves(board);
 
     let mut alpha = alpha;
     let mut beta = beta;
@@ -810,36 +825,52 @@ fn alphabeta(
 
     if maximizing {
         value = i8::MIN;
-        for child in &children {
-            let score = match alphabeta(&child, depth - 1, alpha, beta, false, tt, route, process) {
-                EvalValue::Win(score) => score,
-                EvalValue::Draw => 0,
-                EvalValue::Unknown => {
-                    contains_unknown = true;
-                    continue;
+        for mv in &moves {
+            //手を実行
+            if let Ok(()) = board.apply_move(mv) {
+                //その手ができた場合
+                let score =
+                    match alphabeta(board, depth - 1, alpha, beta, false, tt, route, process) {
+                        EvalValue::Win(score) => score,
+                        EvalValue::Draw => 0,
+                        EvalValue::Unknown => {
+                            contains_unknown = true;
+                            board.undo_move(&mv).unwrap(); //元に戻す
+                            continue;
+                        }
+                    };
+                value = value.max(score);
+                alpha = alpha.max(value);
+                if alpha >= beta {
+                    board.undo_move(&mv).unwrap(); //元に戻す
+                    break;
                 }
-            };
-            value = value.max(score);
-            alpha = alpha.max(value);
-            if alpha >= beta {
-                break;
+                board.undo_move(&mv).unwrap(); //元に戻す
             }
         }
     } else {
         value = i8::MAX;
-        for child in &children {
-            let score = match alphabeta(&child, depth - 1, alpha, beta, true, tt, route, process) {
-                EvalValue::Win(score) => score,
-                EvalValue::Draw => 0,
-                EvalValue::Unknown => {
-                    contains_unknown = true;
-                    continue;
+        for mv in &moves {
+            //手を実行
+            if let Ok(()) = board.apply_move(mv) {
+                //その手ができた場合
+                let score = match alphabeta(board, depth - 1, alpha, beta, true, tt, route, process)
+                {
+                    EvalValue::Win(score) => score,
+                    EvalValue::Draw => 0,
+                    EvalValue::Unknown => {
+                        contains_unknown = true;
+                        board.undo_move(&mv).unwrap(); //元に戻す
+                        continue;
+                    }
+                };
+                value = value.min(score);
+                beta = beta.min(value);
+                if beta <= alpha {
+                    board.undo_move(&mv).unwrap(); //元に戻す
+                    break;
                 }
-            };
-            value = value.min(score);
-            beta = beta.min(value);
-            if beta <= alpha {
-                break;
+                board.undo_move(&mv).unwrap(); //元に戻す
             }
         }
     }
@@ -881,7 +912,7 @@ fn alphabeta(
         );
     }
 
-    route.remove(&board); // 探索パスから除去して戻る
+    route.remove(&board.to_hash()); // 探索パスから除去して戻る
 
     this_node_eval
 }
@@ -907,15 +938,13 @@ impl Progress {
                 "探索ノード数: {}, 現在深さ: {}, TTサイズ: {}",
                 self.nodes_searched, current_depth, tt_size
             );
-            // println!("{}", board._to_string());
+            println!("{}", board._to_string());
             self.last_print = now;
         }
     }
 }
 
 fn main() {
-    _play_vidro();
-    return;
     let capacity = NonZeroUsize::new(100_000).unwrap();
     let mut tt: LruCache<u64, Eval> = LruCache::new(capacity);
 
@@ -935,14 +964,14 @@ fn main() {
     // vidro.set_ohajiki((2, 3)).unwrap();
 
     let mut process = Progress::new();
-    let mut route: HashSet<Vidro> = HashSet::new();
+    let mut route: HashSet<u64> = HashSet::new();
     let depth = 50;
 
     let mut result = EvalValue::Unknown;
     println!("depth: {}", 0);
     for depth_run in 1..=depth {
         result = alphabeta(
-            &vidro,
+            &mut vidro,
             depth_run,
             i8::MIN,
             i8::MAX,
