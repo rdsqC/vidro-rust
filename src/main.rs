@@ -17,14 +17,27 @@ const ANGLES: [(isize, isize); 8] = [
     (1, 1),
 ];
 
-#[derive(Clone, PartialEq, Hash, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Move {
+    Place {
+        r: usize,
+        c: usize,
+    },
+    Flick {
+        r: usize,
+        c: usize,
+        angle_idx: usize,
+    },
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Vidro {
     turn: u8,
     steps: usize,
-    prev_board: [u8; 25],
     num_player: u8,
     players_has_piece: [u8; 2],
     board_data: [u8; 25],
+    prev_board: [u8; 25],
 }
 
 impl Vidro {
@@ -47,9 +60,9 @@ impl Vidro {
             turn: board as u8 & 0b11,
             board_data,
             steps: board as usize % 2,
-            prev_board: [0; 25],
             num_player: 2, //強制的2人プレイ
             players_has_piece: players_has_piece,
+            prev_board: [0; 25],
         }
     }
     pub fn get_hash_trout(hash: u64, v1: usize, v2: usize) -> u64 {
@@ -97,6 +110,7 @@ impl Vidro {
         //プレイヤーについている数字+1をそのプレイヤーの石として設計している。
         let now_turn_player = self.turn as usize;
         let ohajiki_num = (now_turn_player + 1).try_into().unwrap();
+        let now_board = self.board_data;
 
         if self.board_data[coord.0 * 5 + coord.1] != 0 {
             return Err("既に石があります");
@@ -108,11 +122,54 @@ impl Vidro {
                 self.players_has_piece[now_turn_player] -= 1;
                 self.next_turn();
                 self.steps += 1;
+                self.prev_board = now_board;
                 return Ok(());
             }
         } else {
             return Err("もう置く石がありません");
         }
+    }
+    fn flick_ohajiki_fast(&mut self, r: usize, c: usize, adix: usize) -> Result<(), &'static str> {
+        let mut map: Vec<usize> = Vec::new();
+        let angle = ANGLES[adix];
+        let now_board = self.board_data;
+        {
+            let mut mr = r as isize;
+            let mut mc = c as isize;
+            while (0 <= mr && mr < 5) && (0 <= mc && mc < 5) {
+                map.push((mr * 5 + mc) as usize);
+                mr += angle.0 as isize;
+                mc += angle.1 as isize;
+            }
+        }
+
+        //駒が動かないはじきを禁止
+        if map.len() < 2 {
+            return Err("駒が動かないはじきはできません");
+        }
+
+        //現在ターンの人の駒でない駒を弾こうとしている場合はルール上除外する
+        if self.board_data[map[0]] != self.turn + 1 {
+            return Err("他人の駒をはじくことはできません");
+        }
+
+        for idx in 0..map.len() - 1 {
+            if self.board_data[map[idx + 1]] == 0 {
+                self.board_data[map[idx + 1]] = self.board_data[map[idx]];
+                self.board_data[map[idx]] = 0;
+            }
+        }
+
+        //千日手判定
+        if self.board_data == self.prev_board {
+            self.board_data = now_board;
+            return Err("千日手です");
+        }
+
+        self.prev_board = now_board;
+        self.next_turn();
+        self.steps += 1;
+        return Ok(());
     }
     fn flick_ohajiki(
         &mut self,
@@ -286,6 +343,28 @@ impl Vidro {
         hash += self.turn as u64;
         hash
     }
+    fn create_legal_moves(&self) {
+        let mut legal_moves: Vec<Move> = Vec::new();
+        //set_ohajiki
+        for r in 0..5 {
+            for c in 0..5 {
+                let now_turn_player = self.turn as usize;
+                let ohajiki_num = (now_turn_player + 1).try_into().unwrap();
+
+                if self.board_data[r * 5 + c] != 0 {
+                    continue;
+                } else if 0 < self.players_has_piece[now_turn_player] {
+                    if self.is_there_surrounding_piece(ohajiki_num, (r, c)) {
+                        continue;
+                    } else {
+                        legal_moves.push(Move::Place { r, c });
+                    }
+                } else {
+                    continue;
+                }
+            }
+        }
+    }
 }
 
 fn read_buffer() -> String {
@@ -390,7 +469,7 @@ fn _play_vidro() {
                     );
                     let angle = caps[3].parse::<usize>().unwrap();
                     if angle < 8 {
-                        match vidro.flick_ohajiki(coord, ANGLES[angle]) {
+                        match vidro.flick_ohajiki_fast(coord.0, coord.1, angle) {
                             Ok(()) => {
                                 break;
                             } //成功
@@ -731,7 +810,7 @@ fn create_children_on_node(target_board: &Vidro, sorting: bool) -> Vec<Vidro> {
     for i in 0..5 {
         for j in 0..5 {
             for a in 0..8 {
-                if let Ok(()) = new_vidro.flick_ohajiki((i, j), ANGLES[a]) {
+                if let Ok(()) = new_vidro.flick_ohajiki_fast(i, j, a) {
                     //テキトー置きが成功したとき
                     //childrenに追加
                     canonical_board(&mut new_vidro.board_data);
@@ -914,8 +993,8 @@ impl Progress {
 }
 
 fn main() {
-    // _play_vidro();
-    // return;
+    _play_vidro();
+    return;
     let capacity = NonZeroUsize::new(100_000).unwrap();
     let mut tt: LruCache<u64, Eval> = LruCache::new(capacity);
 
