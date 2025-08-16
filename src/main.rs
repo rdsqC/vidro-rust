@@ -883,6 +883,7 @@ fn create_legal_moves(target_board: &mut Vidro) -> Vec<Move> {
 }
 
 const USE_CACHE: bool = false;
+const USE_CACHE_DEPTH: usize = 8;
 
 fn alphabeta(
     board: &mut Vidro,
@@ -893,8 +894,9 @@ fn alphabeta(
     tt: &mut LruCache<u64, Eval>,
     route: &mut Vec<u64>,
     process: &mut Progress,
+    max_depth: usize,
 ) -> EvalValue {
-    process.update(depth, tt.len(), board);
+    // process.update(depth, board);
 
     let hash = board.to_hash();
 
@@ -904,7 +906,7 @@ fn alphabeta(
     }
     route.push(hash);
 
-    if USE_CACHE {
+    if USE_CACHE && USE_CACHE_DEPTH <= max_depth {
         if let Some(cached) = tt.get(&hash) {
             if cached.evaluated {
                 match cached.value {
@@ -926,7 +928,7 @@ fn alphabeta(
     let eval = win_eval_bit_shift(board);
     if eval.evaluated || depth == 0 {
         let eval = eval.value;
-        if USE_CACHE {
+        if USE_CACHE && USE_CACHE_DEPTH <= max_depth {
             tt.put(
                 hash,
                 Eval {
@@ -954,7 +956,17 @@ fn alphabeta(
             //手を実行
             board.apply_move_force(mv);
             //その手ができた場合
-            let score = match alphabeta(board, depth - 1, alpha, beta, false, tt, route, process) {
+            let score = match alphabeta(
+                board,
+                depth - 1,
+                alpha,
+                beta,
+                false,
+                tt,
+                route,
+                process,
+                max_depth,
+            ) {
                 EvalValue::Win(score) => score,
                 EvalValue::Draw => 0,
                 EvalValue::Unknown => {
@@ -977,7 +989,17 @@ fn alphabeta(
             //手を実行
             board.apply_move_force(mv);
             //その手ができた場合
-            let score = match alphabeta(board, depth - 1, alpha, beta, true, tt, route, process) {
+            let score = match alphabeta(
+                board,
+                depth - 1,
+                alpha,
+                beta,
+                true,
+                tt,
+                route,
+                process,
+                max_depth,
+            ) {
                 EvalValue::Win(score) => score,
                 EvalValue::Draw => 0,
                 EvalValue::Unknown => {
@@ -1023,7 +1045,7 @@ fn alphabeta(
         }
     };
 
-    if USE_CACHE {
+    if USE_CACHE && USE_CACHE_DEPTH <= max_depth {
         if !is_unknown {
             tt.put(
                 hash,
@@ -1053,13 +1075,13 @@ impl Progress {
         }
     }
 
-    fn update(&mut self, current_depth: usize, tt_size: usize, board: &Vidro) {
+    fn update(&mut self, current_depth: usize, board: &Vidro) {
         self.nodes_searched += 1;
         let now = Instant::now();
         if now.duration_since(self.last_print) >= Duration::from_secs(10) {
             println!(
-                "探索ノード数: {}, 現在深さ: {}, TTサイズ: {}",
-                self.nodes_searched, current_depth, tt_size
+                "探索ノード数: {}, 現在深さ: {}",
+                self.nodes_searched, current_depth,
             );
             println!("{}", board._to_string());
             self.last_print = now;
@@ -1073,7 +1095,7 @@ fn main() {
 
     let mut vidro = Vidro::new(0);
 
-    // vidro.set_ohajiki((2, 2)).unwrap();
+    vidro.set_ohajiki((2, 2)).unwrap();
     // vidro.set_ohajiki((0, 0)).unwrap();
     // vidro.set_ohajiki((0, 4)).unwrap();
     // vidro.set_ohajiki((2, 0)).unwrap();
@@ -1091,8 +1113,8 @@ fn main() {
     let depth = 50;
 
     let mut result = EvalValue::Unknown;
-    println!("depth: {}", 0);
     for depth_run in 1..=depth {
+        println!("depth: {}", depth_run);
         result = alphabeta(
             &mut vidro,
             depth_run,
@@ -1102,12 +1124,12 @@ fn main() {
             &mut tt,
             &mut route,
             &mut process,
+            depth_run,
         );
         if let EvalValue::Win(_) = result {
             break;
         }
         route.clear(); //念のため
-        println!("depth: {}", depth_run);
     }
     println!("評価値: {:?}", result);
 }
