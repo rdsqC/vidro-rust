@@ -958,6 +958,148 @@ fn evaluate_reach(vidro: &mut Vidro) -> i16 {
     return 0;
 }
 
+fn find_mate_recursive(vidro: &mut Vidro, depth: usize, sequence: &mut Vec<Move>) -> bool {
+    //深さ切れ(詰みなしと判断)
+    if depth == 0 {
+        return false;
+    }
+
+    let attacking_moves = generate_threat_moves(vidro);
+    if attacking_moves.is_empty() {
+        return false; //詰めろを掛けられない
+    }
+
+    //OR探索
+    for mv in attacking_moves {
+        vidro.apply_move_force(&mv);
+
+        //受けが無くなっているかどうかを調べる
+        if check_opponent_defense(vidro, depth - 1, sequence) {
+            //受けがないことが確定 == 詰みが見つかった
+            sequence.insert(0, mv.clone());
+            vidro.undo_move(&mv).unwrap();
+            return true;
+        }
+        vidro.undo_move(&mv).unwrap();
+    }
+
+    //どの手も詰みにならなかった
+    false
+}
+
+//NOTE! 詰みの読み筋を相手の物も含めるようにする
+
+// main関数などから呼び出すためのラッパー関数
+pub fn find_mate_sequence(vidro: &mut Vidro, max_depth: usize) -> Option<Vec<Move>> {
+    let mut mate_sequence = Vec::new();
+    if find_mate_recursive(vidro, max_depth, &mut mate_sequence) {
+        Some(mate_sequence)
+    } else {
+        None
+    }
+}
+
+fn check_opponent_defense(vidro: &mut Vidro, depth: usize, sequence: &mut Vec<Move>) -> bool {
+    //勝になっていないかを確認
+    if let EvalValue::Win(v) = win_eval_bit_shift(vidro).value {
+        if v == (1 - vidro.turn as i8) * (-2) + 1 {
+            return true;
+        }
+    }
+
+    if depth == 0 {
+        return false;
+    }
+
+    let defending_moves = generate_defense_moves(vidro);
+    if defending_moves.is_empty() {
+        //受けなし
+        return true;
+    }
+
+    // 生成した受け手の全ての応手に対して、詰み手順が続くか調べる (AND検索)
+    for mv in defending_moves {
+        vidro.apply_move_force(&mv);
+
+        // 自分が再度攻めて詰むかどうかを再帰的に調べる
+        let can_mate = find_mate_recursive(vidro, depth - 1, sequence);
+
+        vidro.undo_move(&mv).unwrap();
+
+        if !can_mate {
+            // 相手のこの受けで詰みが途切れた。
+            // したがって、元の自分の手は必勝の詰み手順ではない。
+            return false;
+        }
+    }
+
+    // 相手がどう受けても、全て詰み手順が続くことが証明された
+    true
+}
+
+fn is_reach(vidro: &mut Vidro) -> bool {
+    vidro.next_turn(); //意図的に手番を書き換え2手差しさせたときに勝利することがあるかを調べる
+    let moves = create_legal_moves_only_flick(vidro);
+    let turn = -(vidro.turn as i8) * 2 + 1;
+    for mv in &moves {
+        vidro.apply_move_force(mv);
+        if let EvalValue::Win(value) = win_eval_bit_shift(vidro).value {
+            if value == turn {
+                vidro.undo_move(mv).unwrap();
+                vidro.next_turn();
+                return true;
+            }
+        }
+        vidro.undo_move(mv).unwrap();
+    }
+    vidro.next_turn();
+    false
+}
+
+fn checkmate_in_one_move(vidro: &mut Vidro) -> bool {
+    let moves = create_legal_moves_only_flick(vidro);
+    let turn = -(vidro.turn as i8) * 2 + 1;
+    for mv in &moves {
+        vidro.apply_move_force(mv);
+        if let EvalValue::Win(value) = win_eval_bit_shift(vidro).value {
+            if value == turn {
+                vidro.undo_move(mv).unwrap();
+                return true;
+            }
+        }
+        vidro.undo_move(mv).unwrap();
+    }
+    false
+}
+
+fn generate_threat_moves(vidro: &mut Vidro) -> Vec<Move> {
+    let mut moves = create_legal_moves(vidro);
+    moves.retain(|mv| {
+        vidro.apply_move_force(mv);
+        if is_reach(vidro) {
+            vidro.undo_move(mv).unwrap();
+            return true;
+        }
+        vidro.undo_move(mv).unwrap();
+        false
+    });
+    moves
+}
+
+fn generate_defense_moves(vidro: &mut Vidro) -> Vec<Move> {
+    let mut moves = create_legal_moves(vidro);
+    moves.retain(|mv| {
+        vidro.apply_move_force(mv);
+        if !checkmate_in_one_move(vidro) {
+            vidro.undo_move(mv).unwrap();
+            return true;
+        }
+        vidro.undo_move(mv).unwrap();
+        false
+    });
+    moves
+}
+
 fn quick_eval(board: &Vidro) -> i8 {
     let mut eval1 = 0i8;
     for i in 0..9 {
