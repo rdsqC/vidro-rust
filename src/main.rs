@@ -734,7 +734,6 @@ fn create_children_on_node(target_board: &Vidro, sorting: bool) -> Vec<Vidro> {
                 if let Ok(()) = new_vidro.flick_ohajiki((i, j), ANGLES[a]) {
                     //テキトー置きが成功したとき
                     //childrenに追加
-                    // let new_board = (new_vidro.board);
                     canonical_board(&mut new_vidro.board_data);
                     children.insert(new_vidro);
                     new_vidro = target_board.clone(); //変更が加わってしまった盤面はもういらない。新しく作りなおす。
@@ -908,7 +907,7 @@ impl Progress {
                 "探索ノード数: {}, 現在深さ: {}, TTサイズ: {}",
                 self.nodes_searched, current_depth, tt_size
             );
-            println!("{}", board._to_string());
+            // println!("{}", board._to_string());
             self.last_print = now;
         }
     }
@@ -917,16 +916,8 @@ impl Progress {
 fn main() {
     // _play_vidro();
     // return;
-    // println!("aaii");
-    // let num_nodes = {
-    //     let a: usize = 2;
-    //     a.pow(20)
-    // };
-    // let result = research(vidro.board, num_nodes);
-    // println!("result: {:?}", result);
-    let capacity = NonZeroUsize::new(100_000_000).unwrap();
+    let capacity = NonZeroUsize::new(100_000).unwrap();
     let mut tt: LruCache<u64, Eval> = LruCache::new(capacity);
-    // let mut tt: HashMap<u64, Node> = HashMap::new();
 
     let mut vidro = Vidro::new(0);
 
@@ -949,7 +940,7 @@ fn main() {
 
     let mut result = EvalValue::Unknown;
     println!("depth: {}", 0);
-    for depth_run in 1..depth {
+    for depth_run in 1..=depth {
         result = alphabeta(
             &vidro,
             depth_run,
