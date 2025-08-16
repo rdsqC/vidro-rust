@@ -598,14 +598,15 @@ lazy_static! {
     static ref WIN_MASKS: Vec<u32> = generate_win_masks();
 }
 
-fn static_evaluation(vidro: &Vidro) -> i16 {
+fn static_evaluation(vidro: &mut Vidro) -> i16 {
     if let EvalValue::Win(v) = win_eval_bit_shift(&vidro).value {
         return v as i16 * 30000;
     }
     let threats = evaluate_threats(&vidro);
     let have_piece = evaluate_have_piece(&vidro);
     let position = evaluate_position(&vidro);
-    threats + have_piece * 150 + position
+    let reach = evaluate_reach(vidro);
+    threats + have_piece * 150 + position + reach
 }
 
 fn evaluate_position(vidro: &Vidro) -> i16 {
@@ -618,15 +619,15 @@ fn evaluate_position(vidro: &Vidro) -> i16 {
         }
     }
 
-    score * 100 * 5 / (POSITION_SCORES.iter().sum::<i16>())
+    score * 150 * 5 / (POSITION_SCORES.iter().sum::<i16>())
 }
 
 const POSITION_SCORES: [i16; 25] = [
-    6, 3, 5, 3, 6, //
-    3, 2, 3, 2, 3, //
-    5, 3, 8, 3, 5, //中央 > 角 > 辺の中央 > その他
-    3, 2, 3, 2, 3, //
-    6, 3, 5, 3, 6, //
+    9, 4, 7, 4, 9, //
+    4, 2, 3, 2, 4, //
+    7, 3, 12, 3, 7, //中央 > 角 > 辺の中央 > その他
+    4, 2, 3, 2, 4, //
+    9, 4, 7, 4, 9, //
 ];
 
 fn evaluate_have_piece(vidro: &Vidro) -> i16 {
@@ -634,9 +635,9 @@ fn evaluate_have_piece(vidro: &Vidro) -> i16 {
 }
 
 fn evaluate_threats(vidro: &Vidro) -> i16 {
-    const OPEN_TWO_SCORE: i16 = 150; // _XX_ (両側が空いている2)
-    const SEMI_OPEN_TWO_SCORE: i16 = 100; // OXX_ や _XXO (片側が空いている2)
-    const SEMI_OPEN_SPLIT_ONE_SCORE: i16 = 150; //X_X (1つ空きオープン)
+    const OPEN_TWO_SCORE: i16 = 100; // _XX_ (両側が空いている2)
+    const SEMI_OPEN_TWO_SCORE: i16 = 50; // OXX_ や _XXO (片側が空いている2)
+    const SEMI_OPEN_SPLIT_ONE_SCORE: i16 = 100; //X_X (1つ空きオープン)
     const OPEN_SPLIT_ONE_SCORE: i16 = 100; //上のX_Xに含まれる _X_X_ (1つ空きのオープンな2)
 
     const MARGIN_WIDTH: u64 = 9;
@@ -935,21 +936,27 @@ struct Eval {
     value: EvalValue,
     evaluated: bool, //評価済みかどうか
 }
-//
-// fn is_board_reach(board: &Vidro) -> i8 {
-//     let mut vidro = board.clone();
-//     vidro.next_turn(); //故意に手番を書き換え2手差しさせたときに勝利することがあるかを調べる
-//     let children = create_children_on_node(&vidro, false);
-//     let turn = -(vidro.turn as i8) * 2 + 1;
-//     for child in &children {
-//         if let EvalValue::Win(value) = win_eval_bit_shift(child).value {
-//             if value == turn {
-//                 return value;
-//             }
-//         }
-//     }
-//     return 0;
-// }
+
+fn evaluate_reach(vidro: &mut Vidro) -> i16 {
+    vidro.next_turn(); //意図的に手番を書き換え2手差しさせたときに勝利することがあるかを調べる
+    let moves = create_legal_moves_only_flick(vidro);
+    let turn = -(vidro.turn as i8) * 2 + 1;
+    for mv in &moves {
+        vidro.apply_move_force(mv);
+        if let EvalValue::Win(value) = win_eval_bit_shift(vidro).value {
+            if value == turn {
+                vidro.undo_move(mv).unwrap();
+                vidro.next_turn();
+                return value as i16
+                    * (10 - vidro.players_has_piece[0] - vidro.players_has_piece[1]) as i16
+                    * 15;
+            }
+        }
+        vidro.undo_move(mv).unwrap();
+    }
+    vidro.next_turn();
+    return 0;
+}
 
 fn quick_eval(board: &Vidro) -> i8 {
     let mut eval1 = 0i8;
@@ -964,6 +971,29 @@ fn order_children(children: &mut Vec<Vidro>, turn: u8) {
         let val = quick_eval(board);
         if turn == 0 { -val } else { val }
     });
+}
+
+fn create_legal_moves_only_flick(target_board: &mut Vidro) -> Vec<Move> {
+    let mut movable: Vec<Move> = Vec::new();
+
+    //可能な限りの子を作成
+    for i in 0..5 {
+        for j in 0..5 {
+            for a in 0..8 {
+                if let Ok(()) = target_board.flick_ohajiki((i, j), ANGLES[a]) {
+                    //テキトー置きが成功したとき
+                    let mv = Move::Flick {
+                        r: i,
+                        c: j,
+                        angle_idx: a,
+                    };
+                    target_board.undo_move(&mv).unwrap(); //変更が加わってしまった盤面を元に戻す
+                    movable.push(mv);
+                }
+            }
+        }
+    }
+    return movable;
 }
 
 fn create_legal_moves(target_board: &mut Vidro) -> Vec<Move> {
@@ -999,7 +1029,8 @@ fn create_legal_moves(target_board: &mut Vidro) -> Vec<Move> {
     return movable;
 }
 
-const USE_CACHE: bool = false;
+const USE_CACHE: bool = true;
+const USE_CACHE_DEPTH: usize = 8;
 
 const DRAW_SCORE: i16 = -1;
 const WIN_LOSE_SCORE: i16 = 30000;
@@ -1013,6 +1044,7 @@ fn alphabeta(
     tt: &mut LruCache<u64, i16>,
     route: &mut Vec<u64>,
     process: &mut Progress,
+    max_depth: usize,
 ) -> i16 {
     process.update(depth, board, tt.len());
 
@@ -1027,7 +1059,7 @@ fn alphabeta(
     }
     route.push(hash);
 
-    if USE_CACHE {
+    if USE_CACHE && max_depth >= USE_CACHE_DEPTH {
         if let Some(cached) = tt.get(&hash) {
             return *cached;
         }
@@ -1063,7 +1095,17 @@ fn alphabeta(
             //手を実行
             board.apply_move_force(mv);
             //その手ができた場合
-            let score = alphabeta(board, depth - 1, alpha, beta, false, tt, route, process);
+            let score = alphabeta(
+                board,
+                depth - 1,
+                alpha,
+                beta,
+                false,
+                tt,
+                route,
+                process,
+                max_depth,
+            );
             board.undo_move(&mv).unwrap(); //元に戻す
             //
             value = value.max(score);
@@ -1078,7 +1120,17 @@ fn alphabeta(
             //手を実行
             board.apply_move_force(mv);
             //その手ができた場合
-            let score = alphabeta(board, depth - 1, alpha, beta, true, tt, route, process);
+            let score = alphabeta(
+                board,
+                depth - 1,
+                alpha,
+                beta,
+                true,
+                tt,
+                route,
+                process,
+                max_depth,
+            );
             board.undo_move(&mv).unwrap(); //元に戻す
             value = value.min(score);
             beta = beta.min(value);
@@ -1090,7 +1142,7 @@ fn alphabeta(
 
     let turn = -(board.turn as i8) * 2 + 1;
 
-    if USE_CACHE {
+    if USE_CACHE && max_depth >= USE_CACHE_DEPTH {
         tt.put(hash, value);
     }
 
@@ -1185,7 +1237,9 @@ fn main() {
                 &mut tt,
                 &mut route,
                 &mut process,
+                depth_run,
             );
+
             vidro.undo_move(&mv).unwrap();
 
             if score > best_score_for_this_depth {
