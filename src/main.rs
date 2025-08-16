@@ -17,7 +17,7 @@ const ANGLES: [(isize, isize); 8] = [
     (1, 1),
 ];
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 enum Move {
     Place {
         r: usize,
@@ -603,11 +603,33 @@ fn static_evaluation(vidro: &Vidro) -> i16 {
         return v as i16 * 30000;
     }
     let threats = evaluate_threats(&vidro);
-    let have_piece = evalute_have_piece(&vidro);
-    threats * 100 + have_piece * 150
+    let have_piece = evaluate_have_piece(&vidro);
+    let position = evaluate_position(&vidro);
+    threats * 100 + have_piece * 150 + position * 100
 }
 
-fn evalute_have_piece(vidro: &Vidro) -> i16 {
+fn evaluate_position(vidro: &Vidro) -> i16 {
+    let mut score = 0;
+    for i in 0..25 {
+        match vidro.board_data[i] {
+            1 => score += POSITION_SCORES[i], // プレイヤー1の駒
+            2 => score -= POSITION_SCORES[i], // プレイヤー2の駒
+            _ => (),
+        }
+    }
+
+    score / (POSITION_SCORES.iter().sum::<i16>())
+}
+
+const POSITION_SCORES: [i16; 25] = [
+    6, 3, 5, 3, 6, //
+    3, 2, 3, 2, 3, //
+    5, 3, 8, 3, 5, //中央 > 角 > 辺の中央 > その他
+    3, 2, 3, 2, 3, //
+    6, 3, 5, 3, 6, //
+];
+
+fn evaluate_have_piece(vidro: &Vidro) -> i16 {
     vidro.players_has_piece[0] as i16 - vidro.players_has_piece[1] as i16
 }
 
@@ -942,63 +964,50 @@ fn create_legal_moves(target_board: &mut Vidro) -> Vec<Move> {
 }
 
 const USE_CACHE: bool = false;
-const USE_CACHE_DEPTH: usize = 9;
+
+const DRAW_SCORE: i16 = -1;
+const WIN_LOSE_SCORE: i16 = 30000;
 
 fn alphabeta(
     board: &mut Vidro,
     depth: usize,
-    alpha: i8,
-    beta: i8,
+    alpha: i16,
+    beta: i16,
     maximizing: bool,
-    tt: &mut LruCache<u64, Eval>,
+    tt: &mut LruCache<u64, i16>,
     route: &mut Vec<u64>,
     process: &mut Progress,
-    max_depth: usize,
-) -> EvalValue {
-    // process.update(depth, board);
+) -> i16 {
+    process.update(depth, board, tt.len());
 
     let hash = board.to_hash();
 
     //千日手判定
     if route.contains(&hash) {
-        return EvalValue::Draw; //引き分け評価
+        return -1; //引き分け評価
     }
     route.push(hash);
 
-    if USE_CACHE && USE_CACHE_DEPTH <= max_depth {
+    if USE_CACHE {
         if let Some(cached) = tt.get(&hash) {
-            if cached.evaluated {
-                match cached.value {
-                    EvalValue::Win(v) => {
-                        route.pop(); // 探索パスから除去して戻る
-                        return EvalValue::Win(v);
-                    }
-                    EvalValue::Draw => {
-                        route.pop(); // 探索パスから除去して戻る
-                        return EvalValue::Draw;
-                    }
-                    _ => (),
-                }
-            }
+            return *cached;
         }
     }
 
     //自己評価
-    let eval = win_eval_bit_shift(board);
-    if eval.evaluated || depth == 0 {
-        let eval = eval.value;
-        if USE_CACHE && USE_CACHE_DEPTH <= max_depth {
-            tt.put(
-                hash,
-                Eval {
-                    value: eval.clone(),
-                    evaluated: true,
-                },
-            );
+    let terminal_eval = win_eval_bit_shift(board);
+    if terminal_eval.evaluated {
+        route.pop();
+        if let EvalValue::Win(v) = terminal_eval.value {
+            return v as i16 * WIN_LOSE_SCORE;
+        } else {
+            return DRAW_SCORE;
         }
+    }
 
-        route.pop(); // 探索パスから除去して戻る
-        return eval;
+    if depth == 0 {
+        route.pop();
+        return static_evaluation(board);
     }
 
     let moves = create_legal_moves(board);
@@ -1010,115 +1019,45 @@ fn alphabeta(
     let mut contains_unknown = false;
 
     if maximizing {
-        value = i8::MIN;
+        value = i16::MIN;
         for mv in &moves {
             //手を実行
             board.apply_move_force(mv);
             //その手ができた場合
-            let score = match alphabeta(
-                board,
-                depth - 1,
-                alpha,
-                beta,
-                false,
-                tt,
-                route,
-                process,
-                max_depth,
-            ) {
-                EvalValue::Win(score) => score,
-                EvalValue::Draw => 0,
-                EvalValue::Unknown => {
-                    contains_unknown = true;
-                    board.undo_move(&mv).unwrap(); //元に戻す
-                    continue;
-                }
-            };
+            let score = alphabeta(board, depth - 1, alpha, beta, false, tt, route, process);
+            board.undo_move(&mv).unwrap(); //元に戻す
+            //
             value = value.max(score);
             alpha = alpha.max(value);
             if alpha >= beta {
-                board.undo_move(&mv).unwrap(); //元に戻す
                 break;
             }
-            board.undo_move(&mv).unwrap(); //元に戻す
         }
     } else {
-        value = i8::MAX;
+        value = i16::MAX;
         for mv in &moves {
             //手を実行
             board.apply_move_force(mv);
             //その手ができた場合
-            let score = match alphabeta(
-                board,
-                depth - 1,
-                alpha,
-                beta,
-                true,
-                tt,
-                route,
-                process,
-                max_depth,
-            ) {
-                EvalValue::Win(score) => score,
-                EvalValue::Draw => 0,
-                EvalValue::Unknown => {
-                    contains_unknown = true;
-                    board.undo_move(&mv).unwrap(); //元に戻す
-                    continue;
-                }
-            };
+            let score = alphabeta(board, depth - 1, alpha, beta, true, tt, route, process);
+            board.undo_move(&mv).unwrap(); //元に戻す
             value = value.min(score);
             beta = beta.min(value);
             if beta <= alpha {
-                board.undo_move(&mv).unwrap(); //元に戻す
                 break;
             }
-            board.undo_move(&mv).unwrap(); //元に戻す
         }
     }
 
     let turn = -(board.turn as i8) * 2 + 1;
 
-    let mut is_unknown = false;
-
-    let this_node_eval = match value {
-        i8::MIN => {
-            is_unknown = true;
-            EvalValue::Unknown
-        }
-        i8::MAX => {
-            is_unknown = true;
-            EvalValue::Unknown
-        }
-        _ => {
-            if value == turn {
-                EvalValue::Win(turn)
-            } else if contains_unknown {
-                is_unknown = true;
-                EvalValue::Unknown
-            } else if value == 0 {
-                EvalValue::Draw
-            } else {
-                EvalValue::Win(-turn)
-            }
-        }
-    };
-
-    if USE_CACHE && USE_CACHE_DEPTH <= max_depth {
-        if !is_unknown {
-            tt.put(
-                hash,
-                Eval {
-                    value: this_node_eval.clone(),
-                    evaluated: true,
-                },
-            );
-        }
+    if USE_CACHE {
+        tt.put(hash, value);
     }
 
     route.pop(); // 探索パスから除去して戻る
 
-    this_node_eval
+    value
 }
 
 struct Progress {
@@ -1134,13 +1073,13 @@ impl Progress {
         }
     }
 
-    fn update(&mut self, current_depth: usize, board: &Vidro) {
+    fn update(&mut self, current_depth: usize, board: &Vidro, tt_len: usize) {
         self.nodes_searched += 1;
         let now = Instant::now();
         if now.duration_since(self.last_print) >= Duration::from_secs(10) {
             println!(
-                "探索ノード数: {}, 現在深さ: {}",
-                self.nodes_searched, current_depth,
+                "探索ノード数: {}, 現在深さ: {}, TT size:{}",
+                self.nodes_searched, current_depth, tt_len
             );
             println!("{}", board._to_string());
             self.last_print = now;
@@ -1150,7 +1089,7 @@ impl Progress {
 
 fn main() {
     let capacity = NonZeroUsize::new(100000).unwrap();
-    let mut tt: LruCache<u64, Eval> = LruCache::new(capacity);
+    let mut tt: LruCache<u64, i16> = LruCache::new(capacity);
 
     let mut vidro = Vidro::new(0);
 
@@ -1171,27 +1110,59 @@ fn main() {
     let mut route: Vec<u64> = Vec::new();
     let depth = 50;
 
-    let mut result = EvalValue::Unknown;
+    let mut best_move: Option<Move> = None;
+
     for depth_run in 1..=depth {
         println!("depth: {}", depth_run);
-        result = alphabeta(
-            &mut vidro,
-            depth_run,
-            i8::MIN,
-            i8::MAX,
-            true,
-            &mut tt,
-            &mut route,
-            &mut process,
-            depth_run,
+
+        let legal_moves = create_legal_moves(&mut vidro);
+        if legal_moves.is_empty() {
+            println!("指せる手がありません。");
+            break;
+        }
+
+        let mut best_score_for_this_depth = i16::MIN;
+        let mut best_move_for_this_depth = legal_moves[0].clone(); // とりあえず初手を暫定最善手とする
+
+        for mv in legal_moves {
+            let mut route: Vec<u64> = Vec::new();
+            vidro.apply_move_force(&mv);
+
+            //相手の手番で探索開始(minimizing)
+            let score = alphabeta(
+                &mut vidro,
+                depth_run - 1,
+                i16::MIN,
+                i16::MAX,
+                false,
+                &mut tt,
+                &mut route,
+                &mut process,
+            );
+            vidro.undo_move(&mv).unwrap();
+
+            if score > best_score_for_this_depth {
+                best_score_for_this_depth = score;
+                best_move_for_this_depth = mv.clone();
+            }
+        }
+
+        // この深さで見つかった最善手と評価値を表示
+        println!(
+            "Depth {}: Best Move: {:?}, Score: {}",
+            depth_run, best_move_for_this_depth, best_score_for_this_depth
         );
-        if let EvalValue::Win(_) = result {
+
+        //見つかった最善手を更新
+        best_move = Some(best_move_for_this_depth);
+
+        //必勝評価が出たら探索を打ち切る
+        if best_score_for_this_depth >= WIN_LOSE_SCORE {
+            println!("必勝法をみつけました。");
             break;
         }
-        if let EvalValue::Draw = result {
-            break;
-        }
+
         route.clear(); //念のため
     }
-    println!("評価値: {:?}", result);
+    println!("最終的な最善手: {:?}", best_move);
 }
