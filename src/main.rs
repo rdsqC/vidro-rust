@@ -606,7 +606,7 @@ fn static_evaluation(vidro: &mut Vidro) -> i16 {
     let have_piece = evaluate_have_piece(&vidro);
     let position = evaluate_position(&vidro);
     let reach = evaluate_reach(vidro);
-    threats + have_piece * 150 + position + reach
+    threats + have_piece * 200 + position + reach
 }
 
 fn evaluate_position(vidro: &Vidro) -> i16 {
@@ -619,15 +619,15 @@ fn evaluate_position(vidro: &Vidro) -> i16 {
         }
     }
 
-    score * 150 * 5 / (POSITION_SCORES.iter().sum::<i16>())
+    score * 10
 }
 
 const POSITION_SCORES: [i16; 25] = [
-    9, 4, 7, 4, 9, //
+    12, 4, 10, 4, 12, //
     4, 2, 3, 2, 4, //
-    7, 3, 12, 3, 7, //中央 > 角 > 辺の中央 > その他
+    10, 3, 14, 3, 10, //中央 > 角 > 辺の中央 > その他
     4, 2, 3, 2, 4, //
-    9, 4, 7, 4, 9, //
+    12, 4, 10, 4, 12, //
 ];
 
 fn evaluate_have_piece(vidro: &Vidro) -> i16 {
@@ -635,10 +635,10 @@ fn evaluate_have_piece(vidro: &Vidro) -> i16 {
 }
 
 fn evaluate_threats(vidro: &Vidro) -> i16 {
-    const OPEN_TWO_SCORE: i16 = 100; // _XX_ (両側が空いている2)
+    const OPEN_TWO_SCORE: i16 = 50; // _XX_ (両側が空いている2)
     const SEMI_OPEN_TWO_SCORE: i16 = 50; // OXX_ や _XXO (片側が空いている2)
-    const SEMI_OPEN_SPLIT_ONE_SCORE: i16 = 100; //X_X (1つ空きオープン)
-    const OPEN_SPLIT_ONE_SCORE: i16 = 100; //上のX_Xに含まれる _X_X_ (1つ空きのオープンな2)
+    const SEMI_OPEN_SPLIT_ONE_SCORE: i16 = 150; //X_X (1つ空きオープン)
+    const OPEN_SPLIT_ONE_SCORE: i16 = 50; //上のX_Xに含まれる _X_X_ (1つ空きのオープンな2)
 
     const MARGIN_WIDTH: u64 = 9;
 
