@@ -548,6 +548,7 @@ fn _play_vidro() {
     }
 }
 
+//ここから下は探索専用
 fn generate_win_masks() -> Vec<u32> {
     let mut masks = Vec::new();
 
@@ -597,7 +598,65 @@ lazy_static! {
     static ref WIN_MASKS: Vec<u32> = generate_win_masks();
 }
 
-//ここから下は探索専用
+fn static_evaluation(vidro: &Vidro) -> i16 {
+    if let EvalValue::Win(v) = win_eval_bit_shift(&vidro).value {
+        return v as i16 * 30000;
+    }
+    let threats = evaluate_threats(&vidro);
+    let have_piece = evalute_have_piece(&vidro);
+    threats * 100 + have_piece * 150
+}
+
+fn evalute_have_piece(vidro: &Vidro) -> i16 {
+    vidro.players_has_piece[0] as i16 - vidro.players_has_piece[1] as i16
+}
+
+fn evaluate_threats(vidro: &Vidro) -> i16 {
+    let mut player_bits = [0u64; 2];
+    for row in 0..5 {
+        for col in 0..5 {
+            let idx = row * 5 + col;
+            let bit_pos = row * 7 + col; //余白bitを2つ用意
+            let c = vidro.board_data[idx];
+            if c != 0 {
+                player_bits[c as usize - 1] |= 1 << bit_pos;
+            }
+        }
+    }
+
+    let mut result = [0i16; 2];
+    for p in 0..2 {
+        let b = player_bits[p];
+
+        //一列が7になっていることに注意する
+        //横
+        result[p] += (b & (b >> 2)).count_ones() as i16;
+
+        //縦
+        result[p] += (b & (b >> 14)).count_ones() as i16;
+
+        //右下斜め
+        result[p] += (b & (b >> 16)).count_ones() as i16;
+
+        //左下斜め
+        result[p] += (b & (b >> 12)).count_ones() as i16;
+
+        //横
+        result[p] += (b & (b >> 1)).count_ones() as i16;
+
+        //縦
+        result[p] += (b & (b >> 7)).count_ones() as i16;
+
+        //右下斜め
+        result[p] += (b & (b >> 8)).count_ones() as i16;
+
+        //左下斜め
+        result[p] += (b & (b >> 6)).count_ones() as i16;
+    }
+
+    return result[1] - result[0];
+}
+
 fn win_eval_bit_shift(vidro: &Vidro) -> Eval {
     let mut player_bits = [0u64; 2];
     for row in 0..5 {
@@ -883,7 +942,7 @@ fn create_legal_moves(target_board: &mut Vidro) -> Vec<Move> {
 }
 
 const USE_CACHE: bool = false;
-const USE_CACHE_DEPTH: usize = 8;
+const USE_CACHE_DEPTH: usize = 9;
 
 fn alphabeta(
     board: &mut Vidro,
@@ -1090,12 +1149,12 @@ impl Progress {
 }
 
 fn main() {
-    let capacity = NonZeroUsize::new(1000).unwrap();
+    let capacity = NonZeroUsize::new(100000).unwrap();
     let mut tt: LruCache<u64, Eval> = LruCache::new(capacity);
 
     let mut vidro = Vidro::new(0);
 
-    vidro.set_ohajiki((2, 2)).unwrap();
+    // vidro.set_ohajiki((2, 2)).unwrap();
     // vidro.set_ohajiki((0, 0)).unwrap();
     // vidro.set_ohajiki((0, 4)).unwrap();
     // vidro.set_ohajiki((2, 0)).unwrap();
@@ -1127,6 +1186,9 @@ fn main() {
             depth_run,
         );
         if let EvalValue::Win(_) = result {
+            break;
+        }
+        if let EvalValue::Draw = result {
             break;
         }
         route.clear(); //念のため
