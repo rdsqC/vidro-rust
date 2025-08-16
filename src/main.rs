@@ -46,6 +46,7 @@ pub struct Vidro {
     players_has_piece: [u8; 2],
     board_data: [u8; 25],
     board_histroy: Vec<Snapshot>,
+    prev_board: [u8; 25],
 }
 
 impl Vidro {
@@ -71,6 +72,7 @@ impl Vidro {
             num_player: 2, //強制的2人プレイ
             players_has_piece: players_has_piece,
             board_histroy: Vec::new(),
+            prev_board: [0; 25],
         }
     }
     pub fn get_hash_trout(hash: u64, v1: usize, v2: usize) -> u64 {
@@ -125,6 +127,8 @@ impl Vidro {
             if self.is_there_surrounding_piece(ohajiki_num, coord) {
                 return Err("周りに既に石があります");
             } else {
+                self.prev_board = self.board_data;
+
                 //スナップショット保存
                 self.board_histroy.push(Snapshot {
                     turn: self.turn,
@@ -215,6 +219,14 @@ impl Vidro {
         coord: (usize, usize),
         angle: (isize, isize),
     ) -> Result<(), &'static str> {
+        //スナップショット保存
+        let snapshot_before_change = Snapshot {
+            turn: self.turn,
+            steps: self.steps,
+            players_has_piece: self.players_has_piece,
+            board_data: self.board_data,
+        };
+
         let now_turn_player = self.turn as usize;
         let ohajiki_num: u8 = (now_turn_player + 1).try_into().unwrap();
 
@@ -289,7 +301,10 @@ impl Vidro {
                         self.steps += 1;
 
                         //前の手を保存
-                        self.prev_board = now_board.clone();
+                        self.prev_board = now_board;
+                        //スナップショット保存
+                        self.board_histroy.push(snapshot_before_change);
+
                         return Ok(());
                     }
                 }
@@ -385,7 +400,7 @@ impl Vidro {
     fn apply_move(&mut self, mv: &Move) -> Result<(), &'static str> {
         match mv {
             Move::Place { r, c } => self.set_ohajiki((*r, *c)),
-            Move::Flick { r, c, angle_idx } => self.flick_ohajiki_fast(*r, *c, *angle_idx),
+            Move::Flick { r, c, angle_idx } => self.flick_ohajiki((*r, *c), ANGLES[*angle_idx]),
         }
     }
     fn undo_move(&mut self, _mv: &Move) -> Result<(), &'static str> {
@@ -503,7 +518,7 @@ fn _play_vidro() {
                     );
                     let angle = caps[3].parse::<usize>().unwrap();
                     if angle < 8 {
-                        match vidro.flick_ohajiki_fast(coord.0, coord.1, angle) {
+                        match vidro.flick_ohajiki(coord, ANGLES[angle]) {
                             Ok(()) => {
                                 break;
                             } //成功
@@ -841,7 +856,7 @@ fn create_legal_moves(target_board: &mut Vidro) -> Vec<Move> {
     for i in 0..5 {
         for j in 0..5 {
             for a in 0..8 {
-                if let Ok(()) = target_board.flick_ohajiki_fast(i, j, a) {
+                if let Ok(()) = target_board.flick_ohajiki((i, j), ANGLES[a]) {
                     //テキトー置きが成功したとき
                     let mv = Move::Flick {
                         r: i,
@@ -864,28 +879,28 @@ fn alphabeta(
     beta: i8,
     maximizing: bool,
     tt: &mut LruCache<u64, Eval>,
-    route: &mut HashSet<u64>,
+    route: &mut Vec<u64>,
     process: &mut Progress,
 ) -> EvalValue {
     process.update(depth, tt.len(), board);
 
+    let hash = board.to_hash();
+
     //千日手判定
-    if route.contains(&board.to_hash()) {
+    if route.contains(&hash) {
         return EvalValue::Draw; //引き分け評価
     }
-    route.insert(board.to_hash());
-
-    let hash = board.to_hash();
+    route.push(hash);
 
     if let Some(cached) = tt.get(&hash) {
         if cached.evaluated {
             match cached.value {
                 EvalValue::Win(v) => {
-                    route.remove(&board.to_hash()); // 探索パスから除去して戻る
+                    route.pop(); // 探索パスから除去して戻る
                     return EvalValue::Win(v);
                 }
                 EvalValue::Draw => {
-                    route.remove(&board.to_hash()); // 探索パスから除去して戻る
+                    route.pop(); // 探索パスから除去して戻る
                     return EvalValue::Draw;
                 }
                 _ => (),
@@ -905,7 +920,7 @@ fn alphabeta(
             },
         );
 
-        route.remove(&board.to_hash()); // 探索パスから除去して戻る
+        route.pop(); // 探索パスから除去して戻る
         return eval;
     }
 
@@ -1006,7 +1021,7 @@ fn alphabeta(
         );
     }
 
-    route.remove(&board.to_hash()); // 探索パスから除去して戻る
+    route.pop(); // 探索パスから除去して戻る
 
     this_node_eval
 }
@@ -1039,7 +1054,7 @@ impl Progress {
 }
 
 fn main() {
-    let capacity = NonZeroUsize::new(100_000).unwrap();
+    let capacity = NonZeroUsize::new(10_000).unwrap();
     let mut tt: LruCache<u64, Eval> = LruCache::new(capacity);
 
     let mut vidro = Vidro::new(0);
@@ -1058,7 +1073,7 @@ fn main() {
     // vidro.set_ohajiki((2, 3)).unwrap();
 
     let mut process = Progress::new();
-    let mut route: HashSet<u64> = HashSet::new();
+    let mut route: Vec<u64> = Vec::new();
     let depth = 50;
 
     let mut result = EvalValue::Unknown;
