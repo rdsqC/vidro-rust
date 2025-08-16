@@ -37,7 +37,7 @@ pub struct Vidro {
     num_player: u8,
     players_has_piece: [u8; 2],
     board_data: [u8; 25],
-    prev_board: [u8; 25],
+    board_histroy: Vec<[u8; 25]>,
 }
 
 impl Vidro {
@@ -62,7 +62,7 @@ impl Vidro {
             steps: board as usize % 2,
             num_player: 2, //強制的2人プレイ
             players_has_piece: players_has_piece,
-            prev_board: [0; 25],
+            board_histroy: Vec::new(),
         }
     }
     pub fn get_hash_trout(hash: u64, v1: usize, v2: usize) -> u64 {
@@ -110,7 +110,6 @@ impl Vidro {
         //プレイヤーについている数字+1をそのプレイヤーの石として設計している。
         let now_turn_player = self.turn as usize;
         let ohajiki_num = (now_turn_player + 1).try_into().unwrap();
-        let now_board = self.board_data;
 
         if self.board_data[coord.0 * 5 + coord.1] != 0 {
             return Err("既に石があります");
@@ -122,7 +121,7 @@ impl Vidro {
                 self.players_has_piece[now_turn_player] -= 1;
                 self.next_turn();
                 self.steps += 1;
-                self.prev_board = now_board;
+                self.board_histroy.push(self.board_data);
                 return Ok(());
             }
         } else {
@@ -161,12 +160,14 @@ impl Vidro {
         }
 
         //千日手判定
-        if self.board_data == self.prev_board {
-            self.board_data = now_board;
-            return Err("千日手です");
+        if let Some(prev_board) = self.board_histroy.get(self.board_histroy.len() - 2) {
+            if self.board_data == *prev_board {
+                self.board_data = now_board;
+                return Err("千日手です");
+            }
         }
 
-        self.prev_board = now_board;
+        self.board_histroy.push(self.board_data);
         self.next_turn();
         self.steps += 1;
         return Ok(());
@@ -253,6 +254,14 @@ impl Vidro {
         match mv {
             Move::Place { r, c } => self.set_ohajiki((*r, *c)),
             Move::Flick { r, c, angle_idx } => self.flick_ohajiki_fast(*r, *c, *angle_idx),
+        }
+    }
+    fn undo_move(&mut self, mv: &Move) -> Result<(), &'static str> {
+        if 0 < self.board_histroy.len() {
+            self.board_data = self.board_histroy.pop().unwrap();
+            Ok(())
+        } else {
+            Err("以前の盤面データはありません。")
         }
     }
     fn create_legal_moves(&self) {
