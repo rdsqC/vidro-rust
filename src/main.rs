@@ -605,7 +605,7 @@ fn static_evaluation(vidro: &Vidro) -> i16 {
     let threats = evaluate_threats(&vidro);
     let have_piece = evaluate_have_piece(&vidro);
     let position = evaluate_position(&vidro);
-    threats * 100 + have_piece * 150 + position * 100
+    threats + have_piece * 150 + position
 }
 
 fn evaluate_position(vidro: &Vidro) -> i16 {
@@ -618,7 +618,7 @@ fn evaluate_position(vidro: &Vidro) -> i16 {
         }
     }
 
-    score / (POSITION_SCORES.iter().sum::<i16>())
+    score * 100 * 5 / (POSITION_SCORES.iter().sum::<i16>())
 }
 
 const POSITION_SCORES: [i16; 25] = [
@@ -630,53 +630,89 @@ const POSITION_SCORES: [i16; 25] = [
 ];
 
 fn evaluate_have_piece(vidro: &Vidro) -> i16 {
-    vidro.players_has_piece[0] as i16 - vidro.players_has_piece[1] as i16
+    vidro.players_has_piece[1] as i16 - vidro.players_has_piece[0] as i16
 }
 
 fn evaluate_threats(vidro: &Vidro) -> i16 {
+    const OPEN_TWO_SCORE: i16 = 150; // _XX_ (両側が空いている2)
+    const SEMI_OPEN_TWO_SCORE: i16 = 100; // OXX_ や _XXO (片側が空いている2)
+    const SEMI_OPEN_SPLIT_ONE_SCORE: i16 = 150; //X_X (1つ空きオープン)
+    const OPEN_SPLIT_ONE_SCORE: i16 = 100; //上のX_Xに含まれる _X_X_ (1つ空きのオープンな2)
+
+    const MARGIN_WIDTH: u64 = 9;
+
+    let mut empty_bits = 0u64;
     let mut player_bits = [0u64; 2];
     for row in 0..5 {
         for col in 0..5 {
             let idx = row * 5 + col;
-            let bit_pos = row * 7 + col; //余白bitを2つ用意
-            let c = vidro.board_data[idx];
-            if c != 0 {
+            let bit_pos = row * MARGIN_WIDTH + col; //余白bitを2つ用意
+            let c = vidro.board_data[idx as usize];
+            if c == 0 {
+                empty_bits |= 1 << bit_pos
+            } else {
                 player_bits[c as usize - 1] |= 1 << bit_pos;
             }
         }
     }
 
-    let mut result = [0i16; 2];
+    let mut total_score = 0i16;
+
     for p in 0..2 {
-        let b = player_bits[p];
+        let me = player_bits[p];
+        let opp = player_bits[1 - p];
+        let mut player_score = 0i16;
 
-        //一列が7になっていることに注意する
-        //横
-        result[p] += (b & (b >> 2)).count_ones() as i16;
+        // 各方向へのシフト量を定義 (7x5盤面用)
+        const DIRS: [u64; 4] = [
+            1,                // 横
+            MARGIN_WIDTH,     // 縦
+            MARGIN_WIDTH - 1, // 右上斜め
+            MARGIN_WIDTH + 1, // 左上斜め
+        ];
 
-        //縦
-        result[p] += (b & (b >> 14)).count_ones() as i16;
+        for &d in &DIRS {
+            // パターン1: オープンな2 (_XX_)
+            // パターン: [空き, 自分, 自分, 空き]
+            let pattern_open_two =
+                (empty_bits >> 0) & (me >> d) & (me >> (d * 2)) & (empty_bits >> (d * 3));
+            player_score += pattern_open_two.count_ones() as i16 * OPEN_TWO_SCORE;
 
-        //右下斜め
-        result[p] += (b & (b >> 16)).count_ones() as i16;
+            // パターン2: 片側が空いた2 (OXX_)
+            // パターン: [相手, 自分, 自分, 空き]
+            let pattern_semi_open_two_a =
+                (opp >> 0) & (me >> d) & (me >> (d * 2)) & (empty_bits >> (d * 3));
+            player_score += pattern_semi_open_two_a.count_ones() as i16 * SEMI_OPEN_TWO_SCORE;
 
-        //左下斜め
-        result[p] += (b & (b >> 12)).count_ones() as i16;
+            // パターン3: 片側が空いた2 (_XXO)
+            // パターン: [空き, 自分, 自分, 相手]
+            let pattern_semi_open_two_b =
+                (empty_bits >> 0) & (me >> d) & (me >> (d * 2)) & (opp >> (d * 3));
+            player_score += pattern_semi_open_two_b.count_ones() as i16 * SEMI_OPEN_TWO_SCORE;
 
-        //横
-        result[p] += (b & (b >> 1)).count_ones() as i16;
+            // パターン4: 1つ空きのオープンな2 (_X_X_)
+            // パターン: [空き, 自分, 空き, 自分, 空き]
+            let pattern_open_split_one = (empty_bits >> 0)
+                & (me >> d)
+                & (empty_bits >> (d * 2))
+                & (me >> (d * 3))
+                & (empty_bits >> (d * 4));
+            player_score += pattern_open_split_one.count_ones() as i16 * OPEN_SPLIT_ONE_SCORE;
 
-        //縦
-        result[p] += (b & (b >> 7)).count_ones() as i16;
+            let pattern_semi_open_split_one = me & (empty_bits >> d) & (me >> (d * 2));
+            player_score +=
+                pattern_semi_open_split_one.count_ones() as i16 * SEMI_OPEN_SPLIT_ONE_SCORE;
+        }
 
-        //右下斜め
-        result[p] += (b & (b >> 8)).count_ones() as i16;
-
-        //左下斜め
-        result[p] += (b & (b >> 6)).count_ones() as i16;
+        // プレイヤー1のスコアは加算、プレイヤー2のスコアは減算
+        if p == 0 {
+            total_score += player_score;
+        } else {
+            total_score -= player_score;
+        }
     }
 
-    return result[1] - result[0];
+    total_score
 }
 
 fn win_eval_bit_shift(vidro: &Vidro) -> Eval {
@@ -980,11 +1016,14 @@ fn alphabeta(
 ) -> i16 {
     process.update(depth, board, tt.len());
 
+    let mut canonical_board_data = board.board_data;
+    canonical_board(&mut canonical_board_data);
+
     let hash = board.to_hash();
 
     //千日手判定
     if route.contains(&hash) {
-        return -1; //引き分け評価
+        return DRAW_SCORE; //引き分け評価
     }
     route.push(hash);
 
@@ -1115,10 +1154,18 @@ fn main() {
     for depth_run in 1..=depth {
         println!("depth: {}", depth_run);
 
-        let legal_moves = create_legal_moves(&mut vidro);
+        let mut legal_moves = create_legal_moves(&mut vidro);
         if legal_moves.is_empty() {
             println!("指せる手がありません。");
             break;
+        }
+
+        // 前の回の探索で見つかった最善手(best_move)を、リストの先頭に移動させる
+        if let Some(prev_best) = best_move.as_ref() {
+            if let Some(pos) = legal_moves.iter().position(|m| m == prev_best) {
+                let m = legal_moves.remove(pos);
+                legal_moves.insert(0, m);
+            }
         }
 
         let mut best_score_for_this_depth = i16::MIN;
