@@ -958,7 +958,20 @@ fn evaluate_reach(vidro: &mut Vidro) -> i16 {
     return 0;
 }
 
+// main関数などから呼び出すためのラッパー関数
+fn find_mate_sequence(vidro: &mut Vidro, max_depth: usize) -> Option<Vec<Move>> {
+    let mut mate_sequence = Vec::new();
+    if find_mate_recursive(vidro, max_depth, &mut mate_sequence) {
+        Some(mate_sequence)
+    } else {
+        None
+    }
+}
+
+// 詰み探索の本体（再帰関数）
 fn find_mate_recursive(vidro: &mut Vidro, depth: usize, sequence: &mut Vec<Move>) -> bool {
+    println!("{}", vidro._to_string());
+
     //深さ切れ(詰みなしと判断)
     if depth == 0 {
         return false;
@@ -989,17 +1002,9 @@ fn find_mate_recursive(vidro: &mut Vidro, depth: usize, sequence: &mut Vec<Move>
 
 //NOTE! 詰みの読み筋を相手の物も含めるようにする
 
-// main関数などから呼び出すためのラッパー関数
-pub fn find_mate_sequence(vidro: &mut Vidro, max_depth: usize) -> Option<Vec<Move>> {
-    let mut mate_sequence = Vec::new();
-    if find_mate_recursive(vidro, max_depth, &mut mate_sequence) {
-        Some(mate_sequence)
-    } else {
-        None
-    }
-}
-
+//受けがないかどうか
 fn check_opponent_defense(vidro: &mut Vidro, depth: usize, sequence: &mut Vec<Move>) -> bool {
+    println!("{}", vidro._to_string());
     //勝になっていないかを確認
     if let EvalValue::Win(v) = win_eval_bit_shift(vidro).value {
         if v == (1 - vidro.turn as i8) * (-2) + 1 {
@@ -1074,9 +1079,18 @@ fn checkmate_in_one_move(vidro: &mut Vidro) -> bool {
 
 fn generate_threat_moves(vidro: &mut Vidro) -> Vec<Move> {
     let mut moves = create_legal_moves(vidro);
+    let turn = -(vidro.turn as i8) * 2 + 1;
     moves.retain(|mv| {
         vidro.apply_move_force(mv);
-        if is_reach(vidro) {
+        //詰ます手
+        if let EvalValue::Win(value) = win_eval_bit_shift(vidro).value {
+            if value == turn {
+                vidro.undo_move(mv).unwrap();
+                return true;
+            }
+        }
+        //詰めろ(自殺手を除く)
+        if is_reach(vidro) && !checkmate_in_one_move(vidro) {
             vidro.undo_move(mv).unwrap();
             return true;
         }
@@ -1326,11 +1340,14 @@ fn main() {
 
     let mut vidro = Vidro::new(0);
 
-    // vidro.set_ohajiki((2, 2)).unwrap();
-    // vidro.set_ohajiki((0, 0)).unwrap();
-    // vidro.set_ohajiki((0, 4)).unwrap();
-    // vidro.set_ohajiki((2, 0)).unwrap();
-    // vidro.set_ohajiki((2, 4)).unwrap();
+    vidro.set_ohajiki((0, 2)).unwrap();
+    vidro.set_ohajiki((0, 0)).unwrap();
+    vidro.set_ohajiki((0, 4)).unwrap();
+    vidro.set_ohajiki((2, 0)).unwrap();
+    vidro.set_ohajiki((2, 4)).unwrap();
+    vidro.set_ohajiki((4, 0)).unwrap();
+
+    println!("{}", vidro._to_string());
 
     // vidro.set_ohajiki((0, 0)).unwrap();
     // vidro.set_ohajiki((4, 4)).unwrap();
@@ -1338,6 +1355,9 @@ fn main() {
     // vidro.set_ohajiki((4, 2)).unwrap();
     // vidro.set_ohajiki((2, 1)).unwrap();
     // vidro.set_ohajiki((2, 3)).unwrap();
+
+    println!("{:#?}", find_mate_sequence(&mut vidro, 7));
+    return;
 
     let mut process = Progress::new();
     let mut route: Vec<u64> = Vec::new();
