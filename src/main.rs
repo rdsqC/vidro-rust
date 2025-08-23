@@ -889,6 +889,132 @@ fn evaluate_reach(vidro: &mut Vidro) -> i16 {
     return 0;
 }
 
+fn find_mate_in_one_move(vidro: &mut Vidro) -> Option<Move> {
+    let moves = create_legal_moves_only_flick(vidro);
+    let turn = vidro.turn;
+    for mv in &moves {
+        vidro.apply_move_force(mv);
+        if let EvalValue::Win(value) = win_eval_bit_shift(vidro).value {
+            if value == turn {
+                vidro.undo_move(mv).unwrap();
+                Some(mv);
+            }
+        }
+        vidro.undo_move(mv).unwrap();
+    }
+    None
+}
+
+const FIND_MATE_MAX_DEPTH: usize = 9;
+
+//先後最善を指した時の詰み手順
+fn find_mate_sequence(vidro: &mut Vidro, max_depth: usize) -> Option<Vec<Move>> {
+    let mut mate_sequence = Vec::new();
+    if let Some(_) = find_mate_sequence_recursive(
+        vidro,
+        FIND_MATE_MAX_DEPTH,
+        usize::MIN,
+        usize::MAX,
+        true,
+        &mut mate_sequence,
+    ) {
+        Some(mate_sequence)
+    } else {
+        None
+    }
+}
+
+fn find_mate_sequence_recursive(
+    vidro: &mut Vidro,
+    depth: usize,
+    alpha: usize,
+    beta: usize,
+    is_attacker: bool,
+) -> Option<(usize, Move)> {
+    //一手詰め判定
+    if is_attacker {
+        if let Some(mv) = find_mate_in_one_move(vidro) {
+            return Some((depth, mv));
+        }
+    }
+
+    if depth == 0 {
+        return None;
+    }
+
+    let mut alpha = alpha;
+    let mut beta = beta;
+
+    if is_attacker {
+        //見つかったときのdepthが大きい物(短く詰ませる)手を探す
+        let attacking_moves = generate_threat_moves(vidro);
+        if attacking_moves.is_empty() {
+            return None;
+        }
+
+        let mut max_depth_found = usize::MIN; //最終的な詰みの深さ
+        let mut best_move: Option<Move> = None;
+
+        for mv in attacking_moves {
+            vidro.apply_move_force(&mv);
+            // 相手の手番で再帰呼び出し
+            if let Some((found_depth, _)) =
+                find_mate_sequence_recursive(vidro, depth - 1, alpha, beta, false)
+            {
+                vidro.undo_move(&mv).unwrap(); //ミスを防ぐためにすぐ戻す
+                if max_depth_found < found_depth {
+                    //最善が更新された
+                    max_depth_found = found_depth;
+                    best_move = Some(mv);
+                }
+                alpha = alpha.max(max_depth_found);
+                if alpha >= beta {
+                    break;
+                }
+            }
+        }
+
+        best_move.map(|mv| (max_depth_found, mv))
+    } else {
+        //見つかったときのdepthが小さい物(長く詰まされる)手を探す
+        //特に効率の良い守る手を見つける方法はないため合法手から絞り込むことにする
+        let defending_moves = create_legal_moves(vidro);
+        //合法手が一つもないということは起きないため空の場合は考えない
+        // if defending_moves.is_empty() {
+        // return Some(depth + 1);
+        // }
+
+        let mut min_depth_found = usize::MAX;
+        let mut best_move: Option<Move> = None;
+
+        for mv in defending_moves {
+            vidro.apply_move_force(&mv);
+            //相手の手番で再帰呼び出し
+            if let Some((found_depth, _)) =
+                find_mate_sequence_recursive(vidro, depth - 1, alpha, beta, true)
+            {
+                //詰む場合
+                vidro.undo_move(&mv).unwrap();
+                if found_depth < min_depth_found {
+                    //最善が更新された
+                    min_depth_found = found_depth;
+                    best_move = Some(mv);
+                }
+                beta = beta.min(min_depth_found);
+
+                //受けきれる場合を考えるため枝切はしない
+            } else {
+                //詰まない場合
+                return None;
+            }
+        }
+
+        //ここで詰まない場合が一つもない
+        //すなわち必ず詰むのでvalueを返却
+        best_move.map(|mv| (min_depth_found, mv))
+    }
+}
+
 // main関数などから呼び出すためのラッパー関数
 fn find_mate(vidro: &mut Vidro, max_depth: usize) -> Option<Move> {
     let mut mate_move = Move::Place { r: 0, c: 0 };
