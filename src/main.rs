@@ -32,21 +32,23 @@ enum Move {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct Snapshot {
-    turn: u8,
+    turn_player: u8,
     steps: usize,
     players_has_piece: [u8; 2],
     board_data: [u8; 25],
+    turn: i8,
 }
 
 #[derive(PartialEq, Eq)]
 pub struct Vidro {
-    turn: u8,
+    turn_player: u8,
     steps: usize,
     num_player: u8,
     players_has_piece: [u8; 2],
     board_data: [u8; 25],
     board_histroy: Vec<Snapshot>,
     prev_board: [u8; 25],
+    turn: i8,
 }
 
 impl Vidro {
@@ -66,7 +68,8 @@ impl Vidro {
         }
 
         Vidro {
-            turn: board as u8 & 0b11,
+            turn_player: board as u8 & 0b11,
+            turn: -(board as i8 & 0b11) * 2 + 1,
             board_data,
             steps: board as usize % 2,
             num_player: 2, //強制的2人プレイ
@@ -83,17 +86,17 @@ impl Vidro {
         let result = hash;
         result >> 2 >> 2 * (24 - index)
     }
-    pub fn set_hash_turn(hash: u64, turn: u8) -> u64 {
+    pub fn set_hash_turn(hash: u64, turn_player: u8) -> u64 {
         let mut result = hash;
         result &= !0b11;
-        result |= turn as u64 & 0b11;
+        result |= turn_player as u64 & 0b11;
         result
     }
-    fn set_turn(&mut self, turn: u8) {
-        self.turn = turn;
+    fn set_turn(&mut self, turn_player: u8) {
+        self.turn_player = turn_player;
     }
     fn next_turn(&mut self) {
-        self.turn = 1 - self.turn;
+        self.turn_player = 1 - self.turn_player;
     }
     fn is_there_surrounding_piece(&self, ohajiki_num: u8, coord: (usize, usize)) -> bool {
         for i in 0..3 {
@@ -117,16 +120,17 @@ impl Vidro {
         false
     }
     fn set_ohajiki_force(&mut self, coord: (usize, usize)) {
-        let now_turn_player = self.turn as usize;
+        let now_turn_player = self.turn_player as usize;
         let ohajiki_num = (now_turn_player + 1).try_into().unwrap();
         self.prev_board = self.board_data;
 
         //スナップショット保存
         self.board_histroy.push(Snapshot {
-            turn: self.turn,
+            turn_player: self.turn_player,
             steps: self.steps,
             players_has_piece: self.players_has_piece,
             board_data: self.board_data,
+            turn: self.turn,
         });
 
         //変更
@@ -137,7 +141,7 @@ impl Vidro {
     }
     fn set_ohajiki(&mut self, coord: (usize, usize)) -> Result<(), &'static str> {
         //プレイヤーについている数字+1をそのプレイヤーの石として設計している。
-        let now_turn_player = self.turn as usize;
+        let now_turn_player = self.turn_player as usize;
         let ohajiki_num = (now_turn_player + 1).try_into().unwrap();
 
         if self.board_data[coord.0 * 5 + coord.1] != 0 {
@@ -150,10 +154,11 @@ impl Vidro {
 
                 //スナップショット保存
                 self.board_histroy.push(Snapshot {
-                    turn: self.turn,
+                    turn_player: self.turn_player,
                     steps: self.steps,
                     players_has_piece: self.players_has_piece,
                     board_data: self.board_data,
+                    turn: self.turn,
                 });
 
                 //変更
@@ -170,10 +175,11 @@ impl Vidro {
     fn flick_ohajiki_force(&mut self, coord: (usize, usize), angle: (isize, isize)) {
         //スナップショット保存
         let snapshot_before_change = Snapshot {
-            turn: self.turn,
+            turn_player: self.turn_player,
             steps: self.steps,
             players_has_piece: self.players_has_piece,
             board_data: self.board_data,
+            turn: self.turn,
         };
 
         let now_board = self.board_data.clone();
@@ -223,13 +229,14 @@ impl Vidro {
     ) -> Result<(), &'static str> {
         //スナップショット保存
         let snapshot_before_change = Snapshot {
-            turn: self.turn,
+            turn_player: self.turn_player,
             steps: self.steps,
             players_has_piece: self.players_has_piece,
             board_data: self.board_data,
+            turn: self.turn,
         };
 
-        let now_turn_player = self.turn as usize;
+        let now_turn_player = self.turn_player as usize;
         let ohajiki_num: u8 = (now_turn_player + 1).try_into().unwrap();
 
         let now_board = self.board_data.clone();
@@ -396,7 +403,7 @@ impl Vidro {
             hash += trout_state as u64;
             hash <<= 2;
         }
-        hash += self.turn as u64;
+        hash += self.turn_player as u64;
         hash
     }
     fn apply_move_force(&mut self, mv: &Move) {
@@ -415,7 +422,7 @@ impl Vidro {
     }
     fn undo_move(&mut self, _mv: &Move) -> Result<(), &'static str> {
         if let Some(s) = self.board_histroy.pop() {
-            self.turn = s.turn;
+            self.turn_player = s.turn_player;
             self.steps = s.steps;
             self.players_has_piece = s.players_has_piece;
             self.board_data = s.board_data;
@@ -907,7 +914,7 @@ struct Eval {
 fn evaluate_reach(vidro: &mut Vidro) -> i16 {
     vidro.next_turn(); //意図的に手番を書き換え2手差しさせたときに勝利することがあるかを調べる
     let moves = create_legal_moves_only_flick(vidro);
-    let turn = -(vidro.turn as i8) * 2 + 1;
+    let turn = -(vidro.turn_player as i8) * 2 + 1;
     for mv in &moves {
         vidro.apply_move_force(mv);
         if let EvalValue::Win(value) = win_eval_bit_shift(vidro).value {
@@ -974,7 +981,7 @@ fn check_opponent_defense(vidro: &mut Vidro, depth: usize, mate_move: &mut Move)
     println!("{}", vidro._to_string());
     //勝になっていないかを確認
     if let EvalValue::Win(v) = win_eval_bit_shift(vidro).value {
-        if v == (1 - vidro.turn as i8) * (-2) + 1 {
+        if v == (1 - vidro.turn_player as i8) * (-2) + 1 {
             return true;
         }
     }
@@ -1012,7 +1019,7 @@ fn check_opponent_defense(vidro: &mut Vidro, depth: usize, mate_move: &mut Move)
 fn is_reach(vidro: &mut Vidro) -> bool {
     vidro.next_turn(); //意図的に手番を書き換え2手差しさせたときに勝利することがあるかを調べる
     let moves = create_legal_moves_only_flick(vidro);
-    let turn = -(vidro.turn as i8) * 2 + 1; //実行側から見て相手側
+    let turn = -(vidro.turn_player as i8) * 2 + 1; //実行側から見て相手側
     let mut found = false;
     for mv in &moves {
         vidro.apply_move_force(mv);
@@ -1032,7 +1039,7 @@ fn is_reach(vidro: &mut Vidro) -> bool {
 
 fn checkmate_in_one_move(vidro: &mut Vidro) -> bool {
     let moves = create_legal_moves_only_flick(vidro);
-    let turn = -(vidro.turn as i8) * 2 + 1;
+    let turn = -(vidro.turn_player as i8) * 2 + 1;
     for mv in &moves {
         vidro.apply_move_force(mv);
         if let EvalValue::Win(value) = win_eval_bit_shift(vidro).value {
@@ -1048,7 +1055,7 @@ fn checkmate_in_one_move(vidro: &mut Vidro) -> bool {
 
 fn generate_threat_moves(vidro: &mut Vidro) -> Vec<Move> {
     let mut moves = create_legal_moves(vidro);
-    let turn = -(vidro.turn as i8) * 2 + 1;
+    let turn = -(vidro.turn_player as i8) * 2 + 1;
     moves.retain(|mv| {
         vidro.apply_move_force(mv);
         //詰ます手
