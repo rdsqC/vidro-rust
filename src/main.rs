@@ -926,17 +926,17 @@ fn evaluate_reach(vidro: &mut Vidro) -> i16 {
 }
 
 // main関数などから呼び出すためのラッパー関数
-fn find_mate_sequence(vidro: &mut Vidro, max_depth: usize) -> Option<Vec<Move>> {
-    let mut mate_sequence = Vec::new();
-    if find_mate_recursive(vidro, max_depth, &mut mate_sequence) {
-        Some(mate_sequence)
+fn find_mate(vidro: &mut Vidro, max_depth: usize) -> Option<Move> {
+    let mut mate_move = Move::Place { r: 0, c: 0 };
+    if find_mate_recursive(vidro, max_depth, &mut mate_move) {
+        Some(mate_move)
     } else {
         None
     }
 }
 
 // 詰み探索の本体（再帰関数）
-fn find_mate_recursive(vidro: &mut Vidro, depth: usize, sequence: &mut Vec<Move>) -> bool {
+fn find_mate_recursive(vidro: &mut Vidro, depth: usize, mate_move: &mut Move) -> bool {
     println!("{}", vidro._to_string());
 
     //深さ切れ(詰みなしと判断)
@@ -954,10 +954,10 @@ fn find_mate_recursive(vidro: &mut Vidro, depth: usize, sequence: &mut Vec<Move>
         vidro.apply_move_force(&mv);
 
         //受けが無くなっているかどうかを調べる
-        if check_opponent_defense(vidro, depth - 1, sequence) {
+        if check_opponent_defense(vidro, depth - 1, mate_move) {
             //受けがないことが確定 == 詰みが見つかった
-            sequence.insert(0, mv.clone());
             vidro.undo_move(&mv).unwrap();
+            *mate_move = mv.clone(); //最後の代入の値==最初に指す手==詰み手順に入る時の手
             return true;
         }
         vidro.undo_move(&mv).unwrap();
@@ -970,7 +970,7 @@ fn find_mate_recursive(vidro: &mut Vidro, depth: usize, sequence: &mut Vec<Move>
 //NOTE! 詰みの読み筋を相手の物も含めるようにする
 
 //受けがないかどうか
-fn check_opponent_defense(vidro: &mut Vidro, depth: usize, sequence: &mut Vec<Move>) -> bool {
+fn check_opponent_defense(vidro: &mut Vidro, depth: usize, mate_move: &mut Move) -> bool {
     println!("{}", vidro._to_string());
     //勝になっていないかを確認
     if let EvalValue::Win(v) = win_eval_bit_shift(vidro).value {
@@ -994,7 +994,7 @@ fn check_opponent_defense(vidro: &mut Vidro, depth: usize, sequence: &mut Vec<Mo
         vidro.apply_move_force(&mv);
 
         // 自分が再度攻めて詰むかどうかを再帰的に調べる
-        let can_mate = find_mate_recursive(vidro, depth - 1, sequence);
+        let can_mate = find_mate_recursive(vidro, depth - 1, mate_move);
 
         vidro.undo_move(&mv).unwrap();
 
@@ -1303,12 +1303,16 @@ fn main() {
 
     let mut vidro = Vidro::new(0);
 
-    vidro.set_ohajiki((0, 2)).unwrap();
+    vidro.set_ohajiki((2, 2)).unwrap();
     vidro.set_ohajiki((0, 0)).unwrap();
     vidro.set_ohajiki((0, 4)).unwrap();
     vidro.set_ohajiki((2, 0)).unwrap();
     vidro.set_ohajiki((2, 4)).unwrap();
+    vidro.set_ohajiki((1, 2)).unwrap();
+    vidro.set_ohajiki((1, 0)).unwrap();
     vidro.set_ohajiki((4, 0)).unwrap();
+    vidro.set_ohajiki((3, 0)).unwrap();
+    vidro.set_ohajiki((4, 2)).unwrap();
 
     println!("{}", vidro._to_string());
 
@@ -1319,7 +1323,7 @@ fn main() {
     // vidro.set_ohajiki((2, 1)).unwrap();
     // vidro.set_ohajiki((2, 3)).unwrap();
 
-    println!("{:#?}", find_mate_sequence(&mut vidro, 7));
+    println!("{:#?}", find_mate(&mut vidro, 9));
     return;
 
     let mut process = Progress::new();
