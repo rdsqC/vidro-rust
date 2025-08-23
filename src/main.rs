@@ -1012,20 +1012,22 @@ fn check_opponent_defense(vidro: &mut Vidro, depth: usize, mate_move: &mut Move)
 fn is_reach(vidro: &mut Vidro) -> bool {
     vidro.next_turn(); //意図的に手番を書き換え2手差しさせたときに勝利することがあるかを調べる
     let moves = create_legal_moves_only_flick(vidro);
-    let turn = -(vidro.turn as i8) * 2 + 1;
+    let turn = -(vidro.turn as i8) * 2 + 1; //実行側から見て相手側
+    let mut found = false;
     for mv in &moves {
         vidro.apply_move_force(mv);
         if let EvalValue::Win(value) = win_eval_bit_shift(vidro).value {
             if value == turn {
-                vidro.undo_move(mv).unwrap();
-                vidro.next_turn();
-                return true;
+                found = true;
             }
         }
         vidro.undo_move(mv).unwrap();
+        if found {
+            break;
+        }
     }
     vidro.next_turn();
-    false
+    found
 }
 
 fn checkmate_in_one_move(vidro: &mut Vidro) -> bool {
