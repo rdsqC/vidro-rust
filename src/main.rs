@@ -769,39 +769,6 @@ fn win_eval_bit_shift(vidro: &Vidro) -> Eval {
     Eval { value, evaluated }
 }
 
-fn win_eval_bit(vidro: &Vidro) -> Eval {
-    let mut player_bits = [0u32; 2];
-
-    for idx in 0..25 {
-        let c = vidro.board_data[idx];
-        if c != 0 {
-            player_bits[c as usize - 1] |= 1 << idx;
-        }
-    }
-
-    let mut result = [false; 2];
-    for p in 0..2 {
-        for &mask in WIN_MASKS.iter() {
-            if player_bits[p] & mask == mask {
-                result[p] = true;
-                break;
-            }
-        }
-    }
-    let eval: i8 = if result[0] { 1 } else { 0 } + if result[1] { -1 } else { 0 };
-    let evaluated = result[0] || result[1];
-    let value = if evaluated {
-        if eval == 0 {
-            EvalValue::Draw
-        } else {
-            EvalValue::Win(eval)
-        }
-    } else {
-        EvalValue::Unknown
-    };
-    Eval { value, evaluated }
-}
-
 fn win_eval(vidro: &Vidro) -> Eval {
     let mut result = [false; 2];
 
@@ -1243,8 +1210,6 @@ fn alphabeta(
     let mut beta = beta;
     let mut value;
 
-    let mut contains_unknown = false;
-
     if maximizing {
         value = i16::MIN;
         for mv in &moves {
@@ -1295,8 +1260,6 @@ fn alphabeta(
             }
         }
     }
-
-    let turn = -(board.turn as i8) * 2 + 1;
 
     if USE_CACHE && max_depth >= USE_CACHE_DEPTH {
         tt.put(hash, value);
