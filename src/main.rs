@@ -1298,7 +1298,7 @@ struct TTEntry {
 const USE_CACHE: bool = true;
 const USE_CACHE_DEPTH: usize = 8;
 
-const DRAW_SCORE: i16 = -1;
+const DRAW_SCORE: i16 = 0;
 const WIN_LOSE_SCORE: i16 = 30000;
 
 fn alphabeta(
