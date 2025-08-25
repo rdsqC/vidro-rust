@@ -1456,12 +1456,12 @@ impl Progress {
         self.nodes_searched += 1;
         let now = Instant::now();
         if now.duration_since(self.last_print) >= Duration::from_secs(10) {
-            println!(
-                "探索ノード数: {}, 現在深さ: {}, TT size:{}",
-                self.nodes_searched, current_depth, tt_len
-            );
-            println!("{}", board._to_string());
-            self.last_print = now;
+            // println!(
+            //     "探索ノード数: {}, 現在深さ: {}, TT size:{}",
+            //     self.nodes_searched, current_depth, tt_len
+            // );
+            // println!("{}", board._to_string());
+            // self.last_print = now;
         }
     }
 }
