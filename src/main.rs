@@ -2,6 +2,8 @@ use Vec;
 use lru::LruCache;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
+use std::fs::{File, OpenOptions, metadata};
+use std::io::Write;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -343,8 +345,9 @@ impl Vidro {
         buf += "\n";
         buf += "now steps: ";
         buf += &vidro.steps.to_string();
+        buf += "\n";
 
-        buf += "\u{001b}[47m  0 1 2 3 4\u{001b}[0m\n";
+        buf += "  0 1 2 3 4\n";
         for i in 0..5 {
             buf += &i.to_string();
 
@@ -1349,6 +1352,7 @@ fn alphabeta(
     process: &mut Progress,
     is_root: bool, // ★自分がルートノード（探索の起点）かを知るためのフラグ
     shared_info: Arc<Mutex<SearchInfo>>, // ★情報共有のための構造体
+    log_file: &Arc<Mutex<File>>,
 ) -> (i16, Vec<Move>) {
     process.update(depth, board, tt.len());
     let mut best_pv = Vec::new();
@@ -1376,9 +1380,34 @@ fn alphabeta(
     if depth == 0 {
         route.pop();
         let static_score = evaluate_for_negamax(board);
+        let pattern_score = evaluate_threats(board);
+        let reach_score = evaluate_reach(board);
+        let position_score = evaluate_position(board);
+        let have_piece_score = evaluate_have_piece(board);
+        let num_pieces = board.players_has_piece[0] + board.players_has_piece[1];
+        let threat_moves_count = generate_threat_moves(board).len();
 
-        if static_score * board.turn as i16 > 1000 {
-            if let Some(mate_sequence) = find_mate_sequence(board, 9) {
+        //詰み探索を実行
+        let tsumi_result = find_mate_sequence(board, 7);
+        let tsumi_found = if tsumi_result.is_some() { 1 } else { 0 };
+
+        let log_line = format!(
+            "{},{},{},{},{},{},{},{}\n",
+            tsumi_found,
+            static_score,
+            pattern_score,
+            reach_score,
+            position_score,
+            have_piece_score,
+            num_pieces,
+            threat_moves_count,
+        );
+
+        //ファイル出力
+        writeln!(log_file.lock().unwrap(), "{}", log_line).expect("ログを書き込めませんでした");
+
+        if static_score * board.turn as i16 >= 0 {
+            if let Some(mate_sequence) = tsumi_result {
                 // 詰みを発見！スコアを「勝ち」に格上げし、手順も返す
                 let mate_score = WIN_LOSE_SCORE - mate_sequence.len() as i16;
                 return (mate_score, mate_sequence);
@@ -1431,6 +1460,7 @@ fn alphabeta(
             process,
             false,
             shared_info.clone(),
+            log_file,
         );
         score = -score;
         board.undo_move(&mv).unwrap(); //元に戻す
@@ -1504,53 +1534,26 @@ impl Progress {
     }
 }
 
-fn main() {
-    // _play_vidro();
-    // return;
-    //
-    //テストの局面(詰み)
-    // vidro.set_ohajiki((0, 2)).unwrap();
-    // vidro.set_ohajiki((2, 0)).unwrap();
-    // vidro.set_ohajiki((2, 4)).unwrap();
-    // vidro.set_ohajiki((0, 0)).unwrap();
-    // vidro.set_ohajiki((0, 4)).unwrap();
-    // vidro.set_ohajiki((4, 0)).unwrap();
-
-    //問題の局面
-    // vidro.set_ohajiki((2, 2)).unwrap();
-    // vidro.set_ohajiki((0, 0)).unwrap();
-    // vidro.set_ohajiki((0, 4)).unwrap();
-    // vidro.set_ohajiki((2, 0)).unwrap();
-    // vidro.set_ohajiki((2, 4)).unwrap();
-    // vidro.set_ohajiki((1, 2)).unwrap();
-    // vidro.set_ohajiki((1, 0)).unwrap();
-    // vidro.set_ohajiki((4, 0)).unwrap();
-    // vidro.set_ohajiki((3, 0)).unwrap();
-    // vidro.set_ohajiki((4, 2)).unwrap();
-
-    // println!("{}", vidro._to_string());
-
-    // vidro.set_ohajiki((0, 0)).unwrap();
-    // vidro.set_ohajiki((4, 4)).unwrap();
-    // vidro.set_ohajiki((0, 2)).unwrap();
-    // vidro.set_ohajiki((4, 2)).unwrap();
-    // vidro.set_ohajiki((2, 1)).unwrap();
-    // vidro.set_ohajiki((2, 3)).unwrap();
-
-    // println!("{:#?}", find_mate(&mut vidro, 9));
-    // println!("{:#?}", find_mate_sequence(&mut vidro, 9));
-    let capacity = NonZeroUsize::new(100000).unwrap();
-
-    let mut vidro = Vidro::new(0);
+fn find_best_move(
+    board: &mut Vidro,
+    max_depth: usize,
+    tt: &mut LruCache<u64, TTEntry>,
+    log_file: Arc<Mutex<File>>,
+) -> Option<Move> {
+    // if let Some(mate_sequence) = find_mate_sequence(board, 15) {
+    //     // 15手詰みを探す
+    //     println!("*** 詰み手順発見！ 初手: {:?} ***", mate_sequence[0]);
+    //     return Some(mate_sequence[0].clone());
+    // }
 
     let shared_info = Arc::new(Mutex::new(SearchInfo::default()));
     let info_clone_for_ui = shared_info.clone();
 
-    let mut vidro_for_search = vidro.clone();
     let mut route: Vec<u64> = Vec::new();
-    let depth = 50;
 
     let mut best_move: Option<Move> = None;
+
+    let mut vidro_for_search = board.clone();
 
     let search_thread = thread::spawn(move || {
         let mut tt: LruCache<u64, TTEntry> = LruCache::new(NonZeroUsize::new(100_000).unwrap());
@@ -1559,7 +1562,7 @@ fn main() {
         let mut best_move_overall: Option<Move> = None;
 
         //反復深化ループ
-        for depth_run in 1..=50 {
+        for depth_run in 1..=max_depth {
             let mut route = Vec::new();
 
             //ルートノードで探索
@@ -1573,6 +1576,7 @@ fn main() {
                 &mut process,
                 true,
                 shared_info.clone(),
+                &log_file,
             );
 
             //結果をUIに通知
@@ -1626,7 +1630,122 @@ fn main() {
     }
 
     //探索スレッドの終了を待って最善手を取得
-    let final_best_move = search_thread.join().unwrap();
-    println!("\n探索終了");
-    println!("最終的な最善手: {:?}", final_best_move);
+    search_thread.join().unwrap()
+}
+
+fn main() {
+    // _play_vidro();
+    // return;
+    //
+    //テストの局面(詰み)
+    // vidro.set_ohajiki((0, 2)).unwrap();
+    // vidro.set_ohajiki((2, 0)).unwrap();
+    // vidro.set_ohajiki((2, 4)).unwrap();
+    // vidro.set_ohajiki((0, 0)).unwrap();
+    // vidro.set_ohajiki((0, 4)).unwrap();
+    // vidro.set_ohajiki((4, 0)).unwrap();
+
+    //問題の局面
+    // vidro.set_ohajiki((2, 2)).unwrap();
+    // vidro.set_ohajiki((0, 0)).unwrap();
+    // vidro.set_ohajiki((0, 4)).unwrap();
+    // vidro.set_ohajiki((2, 0)).unwrap();
+    // vidro.set_ohajiki((2, 4)).unwrap();
+    // vidro.set_ohajiki((1, 2)).unwrap();
+    // vidro.set_ohajiki((1, 0)).unwrap();
+    // vidro.set_ohajiki((4, 0)).unwrap();
+    // vidro.set_ohajiki((3, 0)).unwrap();
+    // vidro.set_ohajiki((4, 2)).unwrap();
+
+    // println!("{}", vidro._to_string());
+
+    // vidro.set_ohajiki((0, 0)).unwrap();
+    // vidro.set_ohajiki((4, 4)).unwrap();
+    // vidro.set_ohajiki((0, 2)).unwrap();
+    // vidro.set_ohajiki((4, 2)).unwrap();
+    // vidro.set_ohajiki((2, 1)).unwrap();
+    // vidro.set_ohajiki((2, 3)).unwrap();
+
+    // println!("{:#?}", find_mate(&mut vidro, 9));
+    // println!("{:#?}", find_mate_sequence(&mut vidro, 9));
+
+    let path = "tsumi_log.csv";
+    let log_file_obj = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .expect("ログファイルを開けませんでした");
+    let log_file = Arc::new(Mutex::new(log_file_obj));
+    // CSVのヘッダーを書き込む（プログラム起動時に一度だけ）
+    // ファイルが空の場合のみ書き込むのがより丁寧ですが、ここでは簡略化します
+
+    {
+        if let Ok(meta) = metadata(path) {
+            if meta.len() == 0 {
+                writeln!( log_file.lock().unwrap(), "static_score, pattern_score, reach_score, position_score, have_piece_score, num_pieces, threat_moves_count, tsumi_found")
+                    .expect("ヘッダーを書き込めませんでした");
+            }
+        }
+    }
+
+    let mut vidro = Vidro::new(0);
+    let mut tt: LruCache<u64, TTEntry> = LruCache::new(NonZeroUsize::new(100_000).unwrap());
+
+    let mut move_count = 0;
+    const MAX_MOVES: usize = 100;
+    const RANDOM_MOVES_UNTIL: usize = 6;
+
+    loop {
+        println!("\n--------------------------------");
+        println!("{}", vidro._to_string());
+
+        {
+            let win_eval_result = win_eval_bit_shift(&vidro);
+            if win_eval_result.evaluated {
+                match win_eval_result.value {
+                    EvalValue::Win(v) => {
+                        println!("ゲーム終了 勝者: {}", if v == 1 { "先手" } else { "後手" });
+                    }
+                    EvalValue::Draw => {
+                        println!("ゲーム終了 引き分け");
+                    }
+                    _ => (),
+                }
+                break;
+            }
+        }
+        if move_count >= MAX_MOVES {
+            println!("ゲーム終了 {}手経過により引き分け", MAX_MOVES);
+            break;
+        }
+
+        let best_move: Move;
+        if move_count < RANDOM_MOVES_UNTIL {
+            println!("----ランダムループを選択----");
+            let legal_moves = create_legal_moves(&mut vidro);
+            if legal_moves.is_empty() {
+                break;
+            }
+            use rand::seq::SliceRandom;
+            best_move = (*legal_moves.choose(&mut rand::thread_rng()).unwrap()).clone();
+        } else {
+            println!("思考中...");
+            let search_depth = 5;
+
+            let log_file_for_thread = Arc::clone(&log_file);
+            best_move = match find_best_move(&mut vidro, search_depth, &mut tt, log_file_for_thread)
+            {
+                Some(mv) => mv,
+                None => {
+                    println!("指せる手がありません。手番プレイヤーの負けです");
+                    break;
+                }
+            };
+        }
+        println!("\n決定手: {}", best_move.to_string());
+        vidro.apply_move_force(&best_move);
+
+        move_count += 1;
+    }
+    println!("\n対局終了");
 }

@@ -7,6 +7,7 @@ edition = "2024"
 regex = "1.11.1"
 lru = "0.8"
 lazy_static = "1.4"
+rand = "0.8" 
 
 [profile.release]
 opt-level = 3
