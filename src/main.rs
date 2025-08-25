@@ -645,15 +645,16 @@ fn evaluate_have_piece(vidro: &Vidro) -> i16 {
 }
 
 fn evaluate_threats(vidro: &Vidro) -> i16 {
-    const OPEN_TWO_SCORE: i16 = 50; // _XX_ (両側が空いている2)
-    const SEMI_OPEN_TWO_SCORE: i16 = 50; // OXX_ や _XXO (片側が空いている2)
-    const SEMI_OPEN_SPLIT_ONE_SCORE: i16 = 150; //X_X (1つ空きオープン)
-    const OPEN_SPLIT_ONE_SCORE: i16 = 50; //上のX_Xに含まれる _X_X_ (1つ空きのオープンな2)
+    const OPEN_TWO_SCORE: i16 = 0; // _XX_ (両側が空いている2)
+    const SEMI_OPEN_TWO_SCORE: i16 = 300; // OXX_ や _XXO (片側が空いている2)
+    const SEMI_OPEN_SPLIT_ONE_SCORE: i16 = 300; //X_X (1つ空きオープン)
+    const OPEN_SPLIT_ONE_SCORE: i16 = 0; //上のX_Xに含まれる _X_X_ (1つ空きのオープンな2)
 
     const MARGIN_WIDTH: u64 = 9;
 
     let mut empty_bits = 0u64;
     let mut player_bits = [0u64; 2];
+
     for row in 0..5 {
         for col in 0..5 {
             let idx = row * 5 + col;
