@@ -1688,64 +1688,66 @@ fn main() {
         }
     }
 
-    let mut vidro = Vidro::new(0);
-    let mut tt: LruCache<u64, TTEntry> = LruCache::new(NonZeroUsize::new(100_000).unwrap());
+    for _ in 0..100 {
+        let mut vidro = Vidro::new(0);
+        let mut tt: LruCache<u64, TTEntry> = LruCache::new(NonZeroUsize::new(100_000).unwrap());
 
-    let mut move_count = 0;
-    const MAX_MOVES: usize = 100;
-    const RANDOM_MOVES_UNTIL: usize = 6;
+        let mut move_count = 0;
+        const MAX_MOVES: usize = 100;
+        const RANDOM_MOVES_UNTIL: usize = 6;
 
-    loop {
-        println!("\n--------------------------------");
-        println!("{}", vidro._to_string());
+        loop {
+            println!("\n--------------------------------");
+            println!("{}", vidro._to_string());
 
-        {
-            let win_eval_result = win_eval_bit_shift(&vidro);
-            if win_eval_result.evaluated {
-                match win_eval_result.value {
-                    EvalValue::Win(v) => {
-                        println!("ゲーム終了 勝者: {}", if v == 1 { "先手" } else { "後手" });
-                    }
-                    EvalValue::Draw => {
-                        println!("ゲーム終了 引き分け");
-                    }
-                    _ => (),
-                }
-                break;
-            }
-        }
-        if move_count >= MAX_MOVES {
-            println!("ゲーム終了 {}手経過により引き分け", MAX_MOVES);
-            break;
-        }
-
-        let best_move: Move;
-        if move_count < RANDOM_MOVES_UNTIL {
-            println!("----ランダムループを選択----");
-            let legal_moves = create_legal_moves(&mut vidro);
-            if legal_moves.is_empty() {
-                break;
-            }
-            use rand::seq::SliceRandom;
-            best_move = (*legal_moves.choose(&mut rand::thread_rng()).unwrap()).clone();
-        } else {
-            println!("思考中...");
-            let search_depth = 5;
-
-            let log_file_for_thread = Arc::clone(&log_file);
-            best_move = match find_best_move(&mut vidro, search_depth, &mut tt, log_file_for_thread)
             {
-                Some(mv) => mv,
-                None => {
-                    println!("指せる手がありません。手番プレイヤーの負けです");
+                let win_eval_result = win_eval_bit_shift(&vidro);
+                if win_eval_result.evaluated {
+                    match win_eval_result.value {
+                        EvalValue::Win(v) => {
+                            println!("ゲーム終了 勝者: {}", if v == 1 { "先手" } else { "後手" });
+                        }
+                        EvalValue::Draw => {
+                            println!("ゲーム終了 引き分け");
+                        }
+                        _ => (),
+                    }
                     break;
                 }
-            };
-        }
-        println!("\n決定手: {}", best_move.to_string());
-        vidro.apply_move_force(&best_move);
+            }
+            if move_count >= MAX_MOVES {
+                println!("ゲーム終了 {}手経過により引き分け", MAX_MOVES);
+                break;
+            }
 
-        move_count += 1;
+            let best_move: Move;
+            if move_count < RANDOM_MOVES_UNTIL {
+                println!("----ランダムループを選択----");
+                let legal_moves = create_legal_moves(&mut vidro);
+                if legal_moves.is_empty() {
+                    break;
+                }
+                use rand::seq::SliceRandom;
+                best_move = (*legal_moves.choose(&mut rand::thread_rng()).unwrap()).clone();
+            } else {
+                println!("思考中...");
+                let search_depth = 5;
+
+                let log_file_for_thread = Arc::clone(&log_file);
+                best_move =
+                    match find_best_move(&mut vidro, search_depth, &mut tt, log_file_for_thread) {
+                        Some(mv) => mv,
+                        None => {
+                            println!("指せる手がありません。手番プレイヤーの負けです");
+                            break;
+                        }
+                    };
+            }
+            println!("\n決定手: {}", best_move.to_string());
+            vidro.apply_move_force(&best_move);
+
+            move_count += 1;
+        }
+        println!("\n対局終了");
     }
-    println!("\n対局終了");
 }
