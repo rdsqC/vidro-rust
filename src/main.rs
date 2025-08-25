@@ -954,6 +954,10 @@ fn find_mate_in_one_move(vidro: &mut Vidro) -> Option<Move> {
 
 //先後最善を指した時の詰み手順
 fn find_mate_sequence(vidro: &mut Vidro, max_depth: usize) -> Option<Vec<Move>> {
+    if vidro.players_has_piece[((-vidro.turn + 1) / 2) as usize] > 2 {
+        return None;
+    }
+
     let mut sequence = Vec::new();
     //詰みがあるかどうかをしらべてある場合は手順を構築する
     let result = find_mate_sequence_recursive(vidro, max_depth, usize::MIN, usize::MAX, true);
