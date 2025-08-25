@@ -583,7 +583,7 @@ fn static_evaluation(vidro: &mut Vidro) -> i16 {
     let have_piece = evaluate_have_piece(&vidro);
     let position = evaluate_position(&vidro);
     let reach = evaluate_reach(vidro);
-    threats + have_piece * 200 + position + reach
+    threats + have_piece * 100 + position
 }
 
 fn evaluate_position(vidro: &Vidro) -> i16 {
@@ -596,15 +596,48 @@ fn evaluate_position(vidro: &Vidro) -> i16 {
         }
     }
 
-    score * 10
+    const MARGIN_WIDTH: u64 = 9;
+    let mut empty_bits = 0u64;
+    let mut player_bits = [0u64; 2];
+    for row in 0..5 {
+        for col in 0..5 {
+            let idx = row * 5 + col;
+            let bit_pos = row * MARGIN_WIDTH + col; //余白を用意
+            let c = vidro.board_data[idx as usize];
+            if c == 0 {
+                empty_bits |= 1 << bit_pos
+            } else {
+                player_bits[c as usize - 1] |= 1 << bit_pos;
+            }
+        }
+    }
+    const DIRS: [u64; 4] = [
+        1,                // 横
+        MARGIN_WIDTH,     // 縦
+        MARGIN_WIDTH - 1, // 右上斜め
+        MARGIN_WIDTH + 1, // 左上斜め
+    ];
+
+    //何も置かれていないマスから駒の周りのマスを消して置けるマスの数を考える
+    let mut can_set_map = [empty_bits; 2];
+    for p in 0..2 {
+        for &dir in &DIRS {
+            can_set_map[p] &= !(player_bits[p] >> dir);
+            can_set_map[p] &= !(player_bits[p] << dir);
+        }
+    }
+    score += can_set_map[0].count_ones() as i16 * vidro.players_has_piece[0] as i16;
+    score -= can_set_map[1].count_ones() as i16 * vidro.players_has_piece[1] as i16;
+
+    score
 }
 
 const POSITION_SCORES: [i16; 25] = [
-    12, 4, 10, 4, 12, //
-    4, 2, 3, 2, 4, //
-    10, 3, 14, 3, 10, //中央 > 角 > 辺の中央 > その他
-    4, 2, 3, 2, 4, //
-    12, 4, 10, 4, 12, //
+    10, 0, 9, 0, 10, //
+    0, 2, 4, 2, 0, //
+    9, 4, 12, 4, 9, //中央 > 角 > 辺の中央 > その他
+    0, 2, 4, 2, 0, //
+    10, 0, 9, 0, 10, //
 ];
 
 fn evaluate_have_piece(vidro: &Vidro) -> i16 {
