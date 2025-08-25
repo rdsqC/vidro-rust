@@ -1267,6 +1267,10 @@ fn create_legal_moves(target_board: &mut Vidro) -> Vec<Move> {
     return movable;
 }
 
+fn evaluate_for_negamax(board: &mut Vidro) -> i16 {
+    static_evaluation(board) * board.turn as i16
+}
+
 #[derive(Clone, Default)]
 pub struct SearchInfo {
     pub depth: usize,
@@ -1333,7 +1337,7 @@ fn alphabeta(
 
     if depth == 0 {
         route.pop();
-        let static_score = static_evaluation(board);
+        let static_score = evaluate_for_negamax(board);
 
         if static_score * board.turn as i16 > 1000 {
             if let Some(mate_sequence) = find_mate_sequence(board, 9) {
@@ -1342,7 +1346,7 @@ fn alphabeta(
                 return (mate_score, mate_sequence);
             }
         }
-        return (static_evaluation(board), best_pv);
+        return (static_score, best_pv);
     }
 
     let original_alpha = alpha;
