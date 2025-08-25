@@ -3,8 +3,10 @@ use lru::LruCache;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
+use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::{Duration, Instant};
-use std::{io, usize};
+use std::{clone, io, usize};
 
 const ANGLES: [(isize, isize); 8] = [
     (0, 1),
@@ -30,6 +32,15 @@ enum Move {
     },
 }
 
+impl Move {
+    pub fn to_string(&self) -> String {
+        match self {
+            Move::Place { r, c } => format!("S({},{})", r, c),
+            Move::Flick { r, c, angle_idx } => format!("F({},{},{})", r, c, angle_idx),
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct Snapshot {
     // turn_player: u8,
@@ -39,7 +50,7 @@ struct Snapshot {
     turn: i8,
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Clone)]
 pub struct Vidro {
     // turn_player: u8,
     steps: usize,
@@ -910,10 +921,6 @@ fn find_mate_in_one_move(vidro: &mut Vidro) -> Option<Move> {
 //先後最善を指した時の詰み手順
 fn find_mate_sequence(vidro: &mut Vidro, max_depth: usize) -> Option<Vec<Move>> {
     let mut sequence = Vec::new();
-
-    println!("find_mate_sequence");
-    println!("{}", vidro._to_string());
-
     //詰みがあるかどうかをしらべてある場合は手順を構築する
     let result = find_mate_sequence_recursive(vidro, max_depth, usize::MIN, usize::MAX, true);
 
@@ -925,7 +932,6 @@ fn find_mate_sequence(vidro: &mut Vidro, max_depth: usize) -> Option<Vec<Move>> 
 
         let mut idx = 0;
         while !win_eval_bit_shift(vidro).evaluated {
-            println!("while num: {}\n{}", idx, vidro._to_string());
             if sequence.len() >= max_depth {
                 break;
             }
@@ -1261,6 +1267,30 @@ fn create_legal_moves(target_board: &mut Vidro) -> Vec<Move> {
     return movable;
 }
 
+#[derive(Clone, Default)]
+pub struct SearchInfo {
+    pub depth: usize,
+    pub score: i16,
+    pub pv: Vec<Move>,
+    pub nodes: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TTFlag {
+    Exact,      // このスコアは真の評価値 (alpha < score < beta)
+    LowerBound, // このスコアは下限値 (score >= beta, betaカットで得られた)
+    UpperBound, // このスコアは上限値 (score <= alpha, 有望な手が見つからなかった)
+}
+
+// 置換表に保存するデータ構造
+#[derive(Clone, Copy, Debug)]
+struct TTEntry {
+    score: i16,
+    depth: u8, // 保存したときの探索深さ
+    flag: TTFlag,
+    best_move: Move, // その局面で見つかった最善手
+}
+
 const USE_CACHE: bool = true;
 const USE_CACHE_DEPTH: usize = 8;
 
@@ -1270,113 +1300,139 @@ const WIN_LOSE_SCORE: i16 = 30000;
 fn alphabeta(
     board: &mut Vidro,
     depth: usize,
-    alpha: i16,
-    beta: i16,
-    maximizing: bool,
-    tt: &mut LruCache<u64, i16>,
+    mut alpha: i16,
+    mut beta: i16,
+    tt: &mut LruCache<u64, TTEntry>,
     route: &mut Vec<u64>,
     process: &mut Progress,
-    max_depth: usize,
-) -> i16 {
+    is_root: bool, // ★自分がルートノード（探索の起点）かを知るためのフラグ
+    shared_info: Arc<Mutex<SearchInfo>>, // ★情報共有のための構造体
+) -> (i16, Vec<Move>) {
     process.update(depth, board, tt.len());
-
+    let mut best_pv = Vec::new();
     let mut canonical_board_data = board.board_data;
     canonical_board(&mut canonical_board_data);
-
     let hash = board.to_hash();
-
     //千日手判定
     if route.contains(&hash) {
-        return DRAW_SCORE; //引き分け評価
+        return (DRAW_SCORE, Vec::new()); //引き分け評価
     }
     route.push(hash);
-
-    if USE_CACHE && max_depth >= USE_CACHE_DEPTH {
-        if let Some(cached) = tt.get(&hash) {
-            return *cached;
-        }
-    }
 
     //自己評価
     let terminal_eval = win_eval_bit_shift(board);
     if terminal_eval.evaluated {
         route.pop();
-        if let EvalValue::Win(v) = terminal_eval.value {
-            return v as i16 * WIN_LOSE_SCORE;
+        let score = if let EvalValue::Win(v) = terminal_eval.value {
+            v as i16 * WIN_LOSE_SCORE
         } else {
-            return DRAW_SCORE;
-        }
+            DRAW_SCORE
+        };
+        return (score, Vec::new());
     }
 
     if depth == 0 {
         route.pop();
-        return static_evaluation(board);
-    }
+        let static_score = static_evaluation(board);
 
-    let moves = create_legal_moves(board);
-
-    let mut alpha = alpha;
-    let mut beta = beta;
-    let mut value;
-
-    if maximizing {
-        value = i16::MIN;
-        for mv in &moves {
-            //手を実行
-            board.apply_move_force(mv);
-            //その手ができた場合
-            let score = alphabeta(
-                board,
-                depth - 1,
-                alpha,
-                beta,
-                false,
-                tt,
-                route,
-                process,
-                max_depth,
-            );
-            board.undo_move(&mv).unwrap(); //元に戻す
-            //
-            value = value.max(score);
-            alpha = alpha.max(value);
-            if alpha >= beta {
-                break;
+        if static_score * board.turn as i16 > 1000 {
+            if let Some(mate_sequence) = find_mate_sequence(board, 9) {
+                // 詰みを発見！スコアを「勝ち」に格上げし、手順も返す
+                let mate_score = WIN_LOSE_SCORE - mate_sequence.len() as i16;
+                return (mate_score, mate_sequence);
             }
         }
-    } else {
-        value = i16::MAX;
-        for mv in &moves {
-            //手を実行
-            board.apply_move_force(mv);
-            //その手ができた場合
-            let score = alphabeta(
-                board,
-                depth - 1,
-                alpha,
-                beta,
-                true,
-                tt,
-                route,
-                process,
-                max_depth,
-            );
-            board.undo_move(&mv).unwrap(); //元に戻す
-            value = value.min(score);
-            beta = beta.min(value);
-            if beta <= alpha {
-                break;
+        return (static_evaluation(board), best_pv);
+    }
+
+    let original_alpha = alpha;
+    let mut best_move_from_tt: Option<Move> = None;
+    //置換表参照
+    if USE_CACHE {
+        if let Some(entry) = tt.get(&hash) {
+            if entry.depth as usize >= depth {
+                match entry.flag {
+                    TTFlag::Exact => return (entry.score, vec![entry.best_move]),
+                    TTFlag::LowerBound => alpha = alpha.max(entry.score),
+                    TTFlag::UpperBound => beta = beta.min(entry.score),
+                }
+                if alpha >= beta {
+                    return (entry.score, vec![entry.best_move]);
+                }
             }
+            best_move_from_tt = Some(entry.best_move);
         }
     }
 
-    if USE_CACHE && max_depth >= USE_CACHE_DEPTH {
-        tt.put(hash, value);
+    let mut moves = create_legal_moves(board);
+    if let Some(tt_move) = best_move_from_tt {
+        if let Some(pos) = moves.iter().position(|m| *m == tt_move) {
+            let m = moves.remove(pos);
+            moves.insert(0, m);
+        }
+    }
+
+    let mut best_score = i16::MIN;
+    let mut best_move: Option<Move> = None;
+
+    for mv in &moves {
+        //手を実行
+        board.apply_move_force(mv);
+        //その手ができた場合
+        let (mut score, mut child_pv) = alphabeta(
+            board,
+            depth - 1,
+            -beta,
+            -alpha,
+            tt,
+            route,
+            process,
+            false,
+            shared_info.clone(),
+        );
+        score = -score;
+        board.undo_move(&mv).unwrap(); //元に戻す
+        if best_score < score {
+            best_score = score;
+            best_move = Some(*mv);
+            best_pv.clear();
+            best_pv.push(*mv);
+            best_pv.append(&mut child_pv); // 本格的には子ノードのPVも連結する
+
+            if is_root {
+                let mut info = shared_info.lock().unwrap();
+                info.score = best_score;
+                info.pv = best_pv.clone();
+                info.nodes = process.nodes_searched;
+            }
+        }
+        alpha = alpha.max(best_score);
+        if alpha >= beta {
+            break; //beta cut
+        }
+    }
+
+    if USE_CACHE {
+        if let Some(mv) = best_move {
+            let flag = if best_score <= original_alpha {
+                TTFlag::UpperBound
+            } else if best_score >= beta {
+                TTFlag::LowerBound
+            } else {
+                TTFlag::Exact
+            };
+            let new_entry = TTEntry {
+                best_move: mv,
+                score: best_score,
+                depth: depth as u8,
+                flag,
+            };
+            tt.put(hash, new_entry);
+        }
     }
 
     route.pop(); // 探索パスから除去して戻る
-
-    value
+    (best_score, best_pv)
 }
 
 struct Progress {
@@ -1410,11 +1466,6 @@ fn main() {
     // _play_vidro();
     // return;
     //
-    let capacity = NonZeroUsize::new(100000).unwrap();
-    let mut tt: LruCache<u64, i16> = LruCache::new(capacity);
-
-    let mut vidro = Vidro::new(0);
-
     //テストの局面(詰み)
     // vidro.set_ohajiki((0, 2)).unwrap();
     // vidro.set_ohajiki((2, 0)).unwrap();
@@ -1424,18 +1475,18 @@ fn main() {
     // vidro.set_ohajiki((4, 0)).unwrap();
 
     //問題の局面
-    vidro.set_ohajiki((2, 2)).unwrap();
-    vidro.set_ohajiki((0, 0)).unwrap();
-    vidro.set_ohajiki((0, 4)).unwrap();
-    vidro.set_ohajiki((2, 0)).unwrap();
-    vidro.set_ohajiki((2, 4)).unwrap();
-    vidro.set_ohajiki((1, 2)).unwrap();
-    vidro.set_ohajiki((1, 0)).unwrap();
-    vidro.set_ohajiki((4, 0)).unwrap();
-    vidro.set_ohajiki((3, 0)).unwrap();
-    vidro.set_ohajiki((4, 2)).unwrap();
+    // vidro.set_ohajiki((2, 2)).unwrap();
+    // vidro.set_ohajiki((0, 0)).unwrap();
+    // vidro.set_ohajiki((0, 4)).unwrap();
+    // vidro.set_ohajiki((2, 0)).unwrap();
+    // vidro.set_ohajiki((2, 4)).unwrap();
+    // vidro.set_ohajiki((1, 2)).unwrap();
+    // vidro.set_ohajiki((1, 0)).unwrap();
+    // vidro.set_ohajiki((4, 0)).unwrap();
+    // vidro.set_ohajiki((3, 0)).unwrap();
+    // vidro.set_ohajiki((4, 2)).unwrap();
 
-    println!("{}", vidro._to_string());
+    // println!("{}", vidro._to_string());
 
     // vidro.set_ohajiki((0, 0)).unwrap();
     // vidro.set_ohajiki((4, 4)).unwrap();
@@ -1446,79 +1497,94 @@ fn main() {
 
     // println!("{:#?}", find_mate(&mut vidro, 9));
     // println!("{:#?}", find_mate_sequence(&mut vidro, 9));
+    let capacity = NonZeroUsize::new(100000).unwrap();
 
-    println!("{:#?}", find_mate_sequence(&mut vidro, 9));
+    let mut vidro = Vidro::new(0);
 
-    println!("{}", vidro._to_string());
-    return;
+    let shared_info = Arc::new(Mutex::new(SearchInfo::default()));
+    let info_clone_for_ui = shared_info.clone();
 
-    let mut process = Progress::new();
+    let mut vidro_for_search = vidro.clone();
     let mut route: Vec<u64> = Vec::new();
     let depth = 50;
 
     let mut best_move: Option<Move> = None;
 
-    for depth_run in 1..=depth {
-        println!("depth: {}", depth_run);
+    let search_thread = thread::spawn(move || {
+        let mut tt: LruCache<u64, TTEntry> = LruCache::new(NonZeroUsize::new(100_000).unwrap());
+        let mut process = Progress::new();
 
-        let mut legal_moves = create_legal_moves(&mut vidro);
-        if legal_moves.is_empty() {
-            println!("指せる手がありません。");
-            break;
-        }
+        let mut best_move_overall: Option<Move> = None;
 
-        // 前の回の探索で見つかった最善手(best_move)を、リストの先頭に移動させる
-        if let Some(prev_best) = best_move.as_ref() {
-            if let Some(pos) = legal_moves.iter().position(|m| m == prev_best) {
-                let m = legal_moves.remove(pos);
-                legal_moves.insert(0, m);
-            }
-        }
+        //反復深化ループ
+        for depth_run in 1..=50 {
+            let mut route = Vec::new();
 
-        let mut best_score_for_this_depth = i16::MIN;
-        let mut best_move_for_this_depth = legal_moves[0].clone(); // とりあえず初手を暫定最善手とする
-
-        for mv in legal_moves {
-            let mut route: Vec<u64> = Vec::new();
-            vidro.apply_move_force(&mv);
-
-            //相手の手番で探索開始(minimizing)
-            let score = alphabeta(
-                &mut vidro,
-                depth_run - 1,
-                i16::MIN,
+            //ルートノードで探索
+            let (score, pv_sequence) = alphabeta(
+                &mut vidro_for_search,
+                depth_run,
+                i16::MIN + 1,
                 i16::MAX,
-                false,
                 &mut tt,
                 &mut route,
                 &mut process,
-                depth_run,
+                true,
+                shared_info.clone(),
             );
 
-            vidro.undo_move(&mv).unwrap();
+            //結果をUIに通知
+            {
+                let mut info = shared_info.lock().unwrap();
+                info.score = score;
+                info.depth = depth_run;
+                info.pv = pv_sequence.clone();
+                info.nodes = process.nodes_searched;
+            }
 
-            if score > best_score_for_this_depth {
-                best_score_for_this_depth = score;
-                best_move_for_this_depth = mv.clone();
+            if !pv_sequence.is_empty() {
+                best_move_overall = Some(pv_sequence[0].clone());
+            }
+
+            if score.abs() >= 29000 {
+                //詰み発見
+                break;
             }
         }
 
-        // この深さで見つかった最善手と評価値を表示
-        println!(
-            "Depth {}: Best Move: {:?}, Score: {}",
-            depth_run, best_move_for_this_depth, best_score_for_this_depth
-        );
+        //最終的な最善手を返す
+        best_move_overall
+    });
 
-        //見つかった最善手を更新
-        best_move = Some(best_move_for_this_depth);
+    println!("探索開始...");
+    loop {
+        thread::sleep(Duration::from_millis(200));
+        {
+            let info = info_clone_for_ui.lock().unwrap();
+            print!(
+                "\rDepth: {:2}, Score: {:6}, Nodes: {:8}, PV: {:<50}",
+                info.depth,
+                info.score,
+                info.nodes,
+                info.pv
+                    .iter()
+                    .map(|m| m.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
 
-        //必勝評価が出たら探索を打ち切る
-        if best_score_for_this_depth >= WIN_LOSE_SCORE {
-            println!("必勝法をみつけました。");
-            break;
+            // 標準出力をフラッシュして即時表示
+            use std::io::Write;
+            std::io::stdout().flush().unwrap();
         }
 
-        route.clear(); //念のため
+        if search_thread.is_finished() {
+            break;
+        }
     }
-    println!("最終的な最善手: {:?}", best_move);
+
+    //探索スレッドの終了を待って最善手を取得
+    let final_best_move = search_thread.join().unwrap();
+    println!("\n探索終了");
+    println!("最終的な最善手: {:?}", final_best_move);
 }
