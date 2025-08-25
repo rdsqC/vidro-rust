@@ -2,9 +2,9 @@ use Vec;
 use lru::LruCache;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
-use std::io;
 use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
+use std::{io, usize};
 
 const ANGLES: [(isize, isize); 8] = [
     (0, 1),
@@ -92,7 +92,7 @@ impl Vidro {
         result
     }
     fn next_turn(&mut self) {
-        self.turn *= -1;
+        self.turn = -self.turn;
     }
     fn is_there_surrounding_piece(&self, ohajiki_num: u8, coord: (usize, usize)) -> bool {
         for i in 0..3 {
@@ -116,7 +116,7 @@ impl Vidro {
         false
     }
     fn set_ohajiki_force(&mut self, coord: (usize, usize)) {
-        let now_turn_player = self.steps as usize % 2;
+        let now_turn_player = ((-self.turn + 1) / 2) as usize;
         let ohajiki_num = (now_turn_player + 1).try_into().unwrap();
         self.prev_board = self.board_data;
 
@@ -136,7 +136,7 @@ impl Vidro {
     }
     fn set_ohajiki(&mut self, coord: (usize, usize)) -> Result<(), &'static str> {
         //プレイヤーについている数字+1をそのプレイヤーの石として設計している。
-        let now_turn_player = self.steps as usize % 2;
+        let now_turn_player = ((-self.turn + 1) / 2) as usize;
         let ohajiki_num = (now_turn_player + 1).try_into().unwrap();
 
         if self.board_data[coord.0 * 5 + coord.1] != 0 {
@@ -228,7 +228,7 @@ impl Vidro {
             turn: self.turn,
         };
 
-        let now_turn_player = self.steps as usize % 2;
+        let now_turn_player = ((-self.turn + 1) / 2) as usize;
         let ohajiki_num: u8 = (now_turn_player + 1).try_into().unwrap();
 
         let now_board = self.board_data.clone();
@@ -328,8 +328,10 @@ impl Vidro {
         let mut buf = String::new();
 
         buf += "now turn player: ";
-        buf += &(vidro.steps % (vidro.num_player as usize)).to_string();
+        buf += &((vidro.turn - 1) / (-2)).to_string();
         buf += "\n";
+        buf += "now steps: ";
+        buf += &vidro.steps.to_string();
 
         buf += "\u{001b}[47m  0 1 2 3 4\u{001b}[0m\n";
         for i in 0..5 {
@@ -897,7 +899,7 @@ fn find_mate_in_one_move(vidro: &mut Vidro) -> Option<Move> {
         if let EvalValue::Win(value) = win_eval_bit_shift(vidro).value {
             if value == turn {
                 vidro.undo_move(mv).unwrap();
-                Some(mv);
+                return Some(*mv);
             }
         }
         vidro.undo_move(mv).unwrap();
@@ -905,20 +907,58 @@ fn find_mate_in_one_move(vidro: &mut Vidro) -> Option<Move> {
     None
 }
 
-const FIND_MATE_MAX_DEPTH: usize = 9;
-
 //先後最善を指した時の詰み手順
 fn find_mate_sequence(vidro: &mut Vidro, max_depth: usize) -> Option<Vec<Move>> {
-    let mut mate_sequence = Vec::new();
-    if let Some(_) = find_mate_sequence_recursive(
-        vidro,
-        FIND_MATE_MAX_DEPTH,
-        usize::MIN,
-        usize::MAX,
-        true,
-        &mut mate_sequence,
-    ) {
-        Some(mate_sequence)
+    let mut sequence = Vec::new();
+
+    println!("find_mate_sequence");
+    println!("{}", vidro._to_string());
+
+    //詰みがあるかどうかをしらべてある場合は手順を構築する
+    let result = find_mate_sequence_recursive(vidro, max_depth, usize::MIN, usize::MAX, true);
+
+    if let Some((_, first_move)) = result {
+        //手順構築
+        sequence.push(first_move);
+
+        vidro.apply_move_force(&first_move);
+
+        let mut idx = 0;
+        while !win_eval_bit_shift(vidro).evaluated {
+            println!("while num: {}\n{}", idx, vidro._to_string());
+            if sequence.len() >= max_depth {
+                break;
+            }
+
+            let remaining_depth = (max_depth - sequence.len()) as usize;
+
+            //受け手と攻め手を入れ替え
+            let is_attacker = sequence.len() % 2 == 0;
+            if let Some((_, best_next_move)) = find_mate_sequence_recursive(
+                vidro,
+                remaining_depth,
+                usize::MIN,
+                usize::MAX,
+                is_attacker,
+            ) {
+                vidro.apply_move_force(&best_next_move);
+                sequence.push(best_next_move);
+            } else {
+                //手順が見つからなかった(バグの可能性が高い)
+                for mv in sequence.iter().rev() {
+                    vidro.undo_move(mv).unwrap();
+                }
+                return None;
+            }
+            idx += 1;
+        }
+
+        //見つかった手順を使って盤面を呼び出し前の状態に復元
+        for mv in sequence.iter().rev() {
+            vidro.undo_move(mv).unwrap();
+        }
+
+        Some(sequence)
     } else {
         None
     }
@@ -957,15 +997,15 @@ fn find_mate_sequence_recursive(
 
         for mv in attacking_moves {
             vidro.apply_move_force(&mv);
+            let result = find_mate_sequence_recursive(vidro, depth - 1, alpha, beta, false);
+            vidro.undo_move(&mv).unwrap(); //ミスを防ぐためにすぐ戻す
+            //
             // 相手の手番で再帰呼び出し
-            if let Some((found_depth, _)) =
-                find_mate_sequence_recursive(vidro, depth - 1, alpha, beta, false)
-            {
-                vidro.undo_move(&mv).unwrap(); //ミスを防ぐためにすぐ戻す
+            if let Some((found_depth, _)) = result {
                 if max_depth_found < found_depth {
                     //最善が更新された
                     max_depth_found = found_depth;
-                    best_move = Some(mv);
+                    best_move = Some(mv.clone());
                 }
                 alpha = alpha.max(max_depth_found);
                 if alpha >= beta {
@@ -987,25 +1027,27 @@ fn find_mate_sequence_recursive(
         let mut min_depth_found = usize::MAX;
         let mut best_move: Option<Move> = None;
 
+        //相手の手番で再帰呼び出し
         for mv in defending_moves {
             vidro.apply_move_force(&mv);
-            //相手の手番で再帰呼び出し
-            if let Some((found_depth, _)) =
-                find_mate_sequence_recursive(vidro, depth - 1, alpha, beta, true)
-            {
+            let result = find_mate_sequence_recursive(vidro, depth - 1, alpha, beta, true);
+            vidro.undo_move(&mv).unwrap();
+
+            if result.is_none() {
+                return None;
+            }
+
+            if let Some((found_depth, _)) = result {
                 //詰む場合
-                vidro.undo_move(&mv).unwrap();
                 if found_depth < min_depth_found {
                     //最善が更新された
                     min_depth_found = found_depth;
-                    best_move = Some(mv);
+                    best_move = Some(mv.clone());
                 }
                 beta = beta.min(min_depth_found);
-
-                //受けきれる場合を考えるため枝切はしない
-            } else {
-                //詰まない場合
-                return None;
+                if beta <= alpha {
+                    break;
+                }
             }
         }
 
@@ -1027,8 +1069,6 @@ fn find_mate(vidro: &mut Vidro, max_depth: usize) -> Option<Move> {
 
 // 詰み探索の本体（再帰関数）
 fn find_mate_recursive(vidro: &mut Vidro, depth: usize, mate_move: &mut Move) -> bool {
-    println!("{}", vidro._to_string());
-
     //深さ切れ(詰みなしと判断)
     if depth == 0 {
         return false;
@@ -1061,7 +1101,6 @@ fn find_mate_recursive(vidro: &mut Vidro, depth: usize, mate_move: &mut Move) ->
 
 //受けがないかどうか
 fn check_opponent_defense(vidro: &mut Vidro, depth: usize, mate_move: &mut Move) -> bool {
-    println!("{}", vidro._to_string());
     //勝になっていないかを確認
     if let EvalValue::Win(v) = win_eval_bit_shift(vidro).value {
         if v == -vidro.turn {
@@ -1101,23 +1140,9 @@ fn check_opponent_defense(vidro: &mut Vidro, depth: usize, mate_move: &mut Move)
 
 fn is_reach(vidro: &mut Vidro) -> bool {
     vidro.next_turn(); //意図的に手番を書き換え2手差しさせたときに勝利することがあるかを調べる
-    let moves = create_legal_moves_only_flick(vidro);
-    let turn = vidro.turn; //実行側から見て相手側
-    let mut found = false;
-    for mv in &moves {
-        vidro.apply_move_force(mv);
-        if let EvalValue::Win(value) = win_eval_bit_shift(vidro).value {
-            if value == turn {
-                found = true;
-            }
-        }
-        vidro.undo_move(mv).unwrap();
-        if found {
-            break;
-        }
-    }
-    vidro.next_turn();
-    found
+    let result = checkmate_in_one_move(vidro);
+    vidro.next_turn(); //手番を戻す
+    result
 }
 
 fn checkmate_in_one_move(vidro: &mut Vidro) -> bool {
@@ -1138,16 +1163,8 @@ fn checkmate_in_one_move(vidro: &mut Vidro) -> bool {
 
 fn generate_threat_moves(vidro: &mut Vidro) -> Vec<Move> {
     let mut moves = create_legal_moves(vidro);
-    let turn = vidro.turn;
     moves.retain(|mv| {
         vidro.apply_move_force(mv);
-        //詰ます手
-        if let EvalValue::Win(value) = win_eval_bit_shift(vidro).value {
-            if value == turn {
-                vidro.undo_move(mv).unwrap();
-                return true;
-            }
-        }
         //詰めろ(自殺手を除く)
         if is_reach(vidro) && !checkmate_in_one_move(vidro) {
             vidro.undo_move(mv).unwrap();
@@ -1390,14 +1407,23 @@ impl Progress {
 }
 
 fn main() {
-    _play_vidro();
-    return;
-
+    // _play_vidro();
+    // return;
+    //
     let capacity = NonZeroUsize::new(100000).unwrap();
     let mut tt: LruCache<u64, i16> = LruCache::new(capacity);
 
     let mut vidro = Vidro::new(0);
 
+    //テストの局面(詰み)
+    // vidro.set_ohajiki((0, 2)).unwrap();
+    // vidro.set_ohajiki((2, 0)).unwrap();
+    // vidro.set_ohajiki((2, 4)).unwrap();
+    // vidro.set_ohajiki((0, 0)).unwrap();
+    // vidro.set_ohajiki((0, 4)).unwrap();
+    // vidro.set_ohajiki((4, 0)).unwrap();
+
+    //問題の局面
     vidro.set_ohajiki((2, 2)).unwrap();
     vidro.set_ohajiki((0, 0)).unwrap();
     vidro.set_ohajiki((0, 4)).unwrap();
@@ -1418,7 +1444,12 @@ fn main() {
     // vidro.set_ohajiki((2, 1)).unwrap();
     // vidro.set_ohajiki((2, 3)).unwrap();
 
-    println!("{:#?}", find_mate(&mut vidro, 9));
+    // println!("{:#?}", find_mate(&mut vidro, 9));
+    // println!("{:#?}", find_mate_sequence(&mut vidro, 9));
+
+    println!("{:#?}", find_mate_sequence(&mut vidro, 9));
+
+    println!("{}", vidro._to_string());
     return;
 
     let mut process = Progress::new();
