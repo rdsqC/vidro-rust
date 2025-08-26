@@ -586,7 +586,18 @@ fn static_evaluation(vidro: &mut Vidro) -> i16 {
     let have_piece = evaluate_have_piece(&vidro);
     let position = evaluate_position(&vidro);
     let reach = evaluate_reach(vidro);
-    threats + have_piece * 100 + position
+
+    // 自分の「詰めろ」になる手の数が多いほど、局面は有利
+    let my_threats = generate_threat_moves(vidro).len() as i16;
+    let threat_score = my_threats * 25; // 例：1つの脅威手を25点と評価
+
+    // 相手の脅威の数も計算し、評価値から引くとなお良い
+    vidro.next_turn();
+    let opponent_threats = generate_threat_moves(vidro).len() as i16;
+    let opponent_threat_score = opponent_threats * 25;
+    vidro.next_turn(); // ★手番を必ず元に戻す
+
+    threats + have_piece * 100 + position + threat_score - opponent_threat_score
 }
 
 fn evaluate_position(vidro: &Vidro) -> i16 {
@@ -1380,33 +1391,33 @@ fn alphabeta(
     if depth == 0 {
         route.pop();
         let static_score = evaluate_for_negamax(board);
-        let pattern_score = evaluate_threats(board);
-        let reach_score = evaluate_reach(board);
-        let position_score = evaluate_position(board);
-        let have_piece_score = evaluate_have_piece(board);
-        let num_pieces = board.players_has_piece[0] + board.players_has_piece[1];
+        // let pattern_score = evaluate_threats(board);
+        // let reach_score = evaluate_reach(board);
+        // let position_score = evaluate_position(board);
+        // let have_piece_score = evaluate_have_piece(board);
+        // let num_pieces = board.players_has_piece[0] + board.players_has_piece[1];
         let threat_moves_count = generate_threat_moves(board).len();
-
-        //詰み探索を実行
-        let tsumi_result = find_mate_sequence(board, 7);
-        let tsumi_found = if tsumi_result.is_some() { 1 } else { 0 };
-
-        let log_line = format!(
-            "{},{},{},{},{},{},{},{}\n",
-            tsumi_found,
-            static_score,
-            pattern_score,
-            reach_score,
-            position_score,
-            have_piece_score,
-            num_pieces,
-            threat_moves_count,
-        );
+        //
+        // //詰み探索を実行
+        // let tsumi_found = if tsumi_result.is_some() { 1 } else { 0 };
+        //
+        // let log_line = format!(
+        //     "{},{},{},{},{},{},{},{}\n",
+        //     tsumi_found,
+        //     static_score,
+        //     pattern_score,
+        //     reach_score,
+        //     position_score,
+        //     have_piece_score,
+        //     num_pieces,
+        //     threat_moves_count,
+        // );
 
         //ファイル出力
-        writeln!(log_file.lock().unwrap(), "{}", log_line).expect("ログを書き込めませんでした");
+        // writeln!(log_file.lock().unwrap(), "{}", log_line).expect("ログを書き込めませんでした");
 
-        if static_score * board.turn as i16 >= 0 {
+        if threat_moves_count > 5 {
+            let tsumi_result = find_mate_sequence(board, 7);
             if let Some(mate_sequence) = tsumi_result {
                 // 詰みを発見！スコアを「勝ち」に格上げし、手順も返す
                 let mate_score = WIN_LOSE_SCORE - mate_sequence.len() as i16;
@@ -1537,7 +1548,7 @@ impl Progress {
 fn find_best_move(
     board: &mut Vidro,
     max_depth: usize,
-    tt: &mut LruCache<u64, TTEntry>,
+    tt: Arc<Mutex<LruCache<u64, TTEntry>>>,
     log_file: Arc<Mutex<File>>,
 ) -> Option<Move> {
     // if let Some(mate_sequence) = find_mate_sequence(board, 15) {
@@ -1553,16 +1564,17 @@ fn find_best_move(
 
     let mut best_move: Option<Move> = None;
 
+    let tt_for_thread = Arc::clone(&tt);
     let mut vidro_for_search = board.clone();
 
     let search_thread = thread::spawn(move || {
-        let mut tt: LruCache<u64, TTEntry> = LruCache::new(NonZeroUsize::new(100_000).unwrap());
+        let mut tt_guard = tt_for_thread.lock().unwrap();
         let mut process = Progress::new();
 
         let mut best_move_overall: Option<Move> = None;
 
         //反復深化ループ
-        for depth_run in 1..=max_depth {
+        for depth_run in 0..=max_depth {
             let mut route = Vec::new();
 
             //ルートノードで探索
@@ -1571,7 +1583,7 @@ fn find_best_move(
                 depth_run,
                 i16::MIN + 1,
                 i16::MAX,
-                &mut tt,
+                &mut tt_guard,
                 &mut route,
                 &mut process,
                 true,
@@ -1688,9 +1700,12 @@ fn main() {
         }
     }
 
+    let tt = Arc::new(Mutex::new(LruCache::new(
+        NonZeroUsize::new(100_000).unwrap(),
+    )));
+
     for _ in 0..100 {
         let mut vidro = Vidro::new(0);
-        let mut tt: LruCache<u64, TTEntry> = LruCache::new(NonZeroUsize::new(100_000).unwrap());
 
         let mut move_count = 0;
         const MAX_MOVES: usize = 100;
@@ -1734,14 +1749,19 @@ fn main() {
                 let search_depth = 5;
 
                 let log_file_for_thread = Arc::clone(&log_file);
-                best_move =
-                    match find_best_move(&mut vidro, search_depth, &mut tt, log_file_for_thread) {
-                        Some(mv) => mv,
-                        None => {
-                            println!("指せる手がありません。手番プレイヤーの負けです");
-                            break;
-                        }
-                    };
+                let tt_for_thread = Arc::clone(&tt);
+                best_move = match find_best_move(
+                    &mut vidro,
+                    search_depth,
+                    tt_for_thread,
+                    log_file_for_thread,
+                ) {
+                    Some(mv) => mv,
+                    None => {
+                        println!("指せる手がありません。手番プレイヤーの負けです");
+                        break;
+                    }
+                };
             }
             println!("\n決定手: {}", best_move.to_string());
             vidro.apply_move_force(&best_move);
