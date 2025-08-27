@@ -1,4 +1,4 @@
-pub struct BitVidro {
+pub struct BitBoard {
     player_bods: [u64; 2],
     piece_bod: u64,
     have_piece: [i64; 2],
@@ -69,9 +69,9 @@ const ANGLE_LINE: [u64; 8] = {
     result
 };
 
-impl BitVidro {
+impl BitBoard {
     pub fn new(player_bods: [u64; 2], turn: i64) -> Self {
-        BitVidro {
+        Self {
             player_bods,
             piece_bod: player_bods[0] | player_bods[1],
             have_piece: [
@@ -83,7 +83,7 @@ impl BitVidro {
         }
     }
     pub fn new_initial() -> Self {
-        BitVidro {
+        Self {
             player_bods: [0; 2],
             piece_bod: 0,
             have_piece: [5; 2],
@@ -201,3 +201,5 @@ impl BitVidro {
         return buf;
     }
 }
+
+pub trait Bit {}
