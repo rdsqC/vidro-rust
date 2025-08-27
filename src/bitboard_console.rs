@@ -57,7 +57,7 @@ impl BitboardConsole for Bitboard {
                 buf += if (self.piece_bod >> (c * BITBOD_WIDTH + r)) & 0b1 == 0 {
                     r"m  "
                 } else {
-                    r"m● "
+                    r"m ●"
                 };
                 buf += COLOR_RESET;
             }
@@ -126,7 +126,7 @@ impl BitboardConsole for Bitboard {
                 buf += if (self.piece_bod >> (c * BITBOD_WIDTH + r)) & 0b1 == 0 {
                     r"m  "
                 } else {
-                    r"m● "
+                    r"m ●"
                 };
                 buf += COLOR_RESET;
             }
@@ -151,7 +151,7 @@ impl BitboardConsole for Bitboard {
                 buf += if (self.piece_bod >> (c * BITBOD_WIDTH + r)) & 0b1 == 0 {
                     r"  "
                 } else {
-                    r"● "
+                    r" ●"
                 };
             }
             buf += "\n";
@@ -168,7 +168,7 @@ impl BitboardConsole for Bitboard {
                 buf += if (self.player_bods[0] >> (c * BITBOD_WIDTH + r)) & 0b1 == 0 {
                     r"  "
                 } else {
-                    r"● "
+                    r" ●"
                 };
                 buf += COLOR_RESET;
             }
@@ -186,7 +186,7 @@ impl BitboardConsole for Bitboard {
                 buf += if (self.player_bods[1] >> (c * BITBOD_WIDTH + r)) & 0b1 == 0 {
                     r"  "
                 } else {
-                    r"● "
+                    r" ●"
                 };
                 buf += COLOR_RESET;
             }
