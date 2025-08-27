@@ -1,5 +1,5 @@
 mod bit_vidro;
-use crate::bit_vidro::BitVidro;
+use crate::bit_vidro::{BitVidro, Move};
 use Vec;
 use lru::LruCache;
 use regex::Regex;
@@ -12,7 +12,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use std::{clone, io, usize};
 
-const ANGLES: [(isize, isize); 8] = [
+const ANGLES: [(i64, i64); 8] = [
     (0, 1),
     (-1, 1),
     (-1, 0),
@@ -22,28 +22,6 @@ const ANGLES: [(isize, isize); 8] = [
     (1, 0),
     (1, 1),
 ];
-
-#[derive(PartialEq, Eq, Clone, Copy, Debug)]
-enum Move {
-    Place {
-        r: usize,
-        c: usize,
-    },
-    Flick {
-        r: usize,
-        c: usize,
-        angle_idx: usize,
-    },
-}
-
-impl Move {
-    pub fn to_string(&self) -> String {
-        match self {
-            Move::Place { r, c } => format!("S({},{})", r, c),
-            Move::Flick { r, c, angle_idx } => format!("F({},{},{})", r, c, angle_idx),
-        }
-    }
-}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct Snapshot {
@@ -109,7 +87,7 @@ impl Vidro {
     fn next_turn(&mut self) {
         self.turn = -self.turn;
     }
-    fn is_there_surrounding_piece(&self, ohajiki_num: u8, coord: (usize, usize)) -> bool {
+    fn is_there_surrounding_piece(&self, ohajiki_num: u8, coord: (u64, u64)) -> bool {
         for i in 0..3 {
             for j in 0..3 {
                 if coord.0 as isize + i - 1 < 0
@@ -130,7 +108,7 @@ impl Vidro {
         }
         false
     }
-    fn set_ohajiki_force(&mut self, coord: (usize, usize)) {
+    fn set_ohajiki_force(&mut self, coord: (u64, u64)) {
         let now_turn_player = ((-self.turn + 1) / 2) as usize;
         let ohajiki_num = (now_turn_player + 1).try_into().unwrap();
         self.prev_board = self.board_data;
@@ -144,17 +122,17 @@ impl Vidro {
         });
 
         //変更
-        self.board_data[coord.0 * 5 + coord.1] = ohajiki_num;
+        self.board_data[(coord.0 * 5 + coord.1) as usize] = ohajiki_num;
         self.players_has_piece[now_turn_player] -= 1;
         self.next_turn();
         self.steps += 1;
     }
-    fn set_ohajiki(&mut self, coord: (usize, usize)) -> Result<(), &'static str> {
+    fn set_ohajiki(&mut self, coord: (u64, u64)) -> Result<(), &'static str> {
         //プレイヤーについている数字+1をそのプレイヤーの石として設計している。
         let now_turn_player = ((-self.turn + 1) / 2) as usize;
         let ohajiki_num = (now_turn_player + 1).try_into().unwrap();
 
-        if self.board_data[coord.0 * 5 + coord.1] != 0 {
+        if self.board_data[(coord.0 * 5 + coord.1) as usize] != 0 {
             return Err("既に石があります");
         } else if 0 < self.players_has_piece[now_turn_player] {
             if self.is_there_surrounding_piece(ohajiki_num, coord) {
@@ -171,7 +149,7 @@ impl Vidro {
                 });
 
                 //変更
-                self.board_data[coord.0 * 5 + coord.1] = ohajiki_num;
+                self.board_data[(coord.0 * 5 + coord.1) as usize] = ohajiki_num;
                 self.players_has_piece[now_turn_player] -= 1;
                 self.next_turn();
                 self.steps += 1;
@@ -181,7 +159,7 @@ impl Vidro {
             return Err("もう置く石がありません");
         }
     }
-    fn flick_ohajiki_force(&mut self, coord: (usize, usize), angle: (isize, isize)) {
+    fn flick_ohajiki_force(&mut self, coord: (u64, u64), angle: (i64, i64)) {
         //スナップショット保存
         let snapshot_before_change = Snapshot {
             steps: self.steps,
@@ -192,13 +170,16 @@ impl Vidro {
 
         let now_board = self.board_data.clone();
 
-        let mut target = self.board_data[coord.0 * 5 + coord.1];
+        let mut target = self.board_data[(coord.0 * 5 + coord.1) as usize];
         let mut target_coord: (isize, isize) = (coord.0 as isize, coord.1 as isize);
 
         let mut next: (isize, isize); //default 処理中での移動先の座標を示す。
 
         while target != 0 {
-            next = (target_coord.0 + angle.0, target_coord.1 + angle.1);
+            next = (
+                target_coord.0 + (angle.0 as isize),
+                target_coord.1 + (angle.1 as isize),
+            );
 
             if next.0 < 0 || 5 as isize <= next.0 || next.1 < 0 || 5 as isize <= next.1 {
                 target = 0;
@@ -230,11 +211,7 @@ impl Vidro {
         //スナップショット保存
         self.board_histroy.push(snapshot_before_change);
     }
-    fn flick_ohajiki(
-        &mut self,
-        coord: (usize, usize),
-        angle: (isize, isize),
-    ) -> Result<(), &'static str> {
+    fn flick_ohajiki(&mut self, coord: (u64, u64), angle: (i64, i64)) -> Result<(), &'static str> {
         //スナップショット保存
         let snapshot_before_change = Snapshot {
             steps: self.steps,
@@ -248,7 +225,7 @@ impl Vidro {
 
         let now_board = self.board_data.clone();
 
-        let mut target = self.board_data[coord.0 * 5 + coord.1];
+        let mut target = self.board_data[(coord.0 * 5 + coord.1) as usize];
         let mut target_coord: (isize, isize) = (coord.0 as isize, coord.1 as isize);
 
         if target != ohajiki_num {
@@ -262,7 +239,10 @@ impl Vidro {
         while target != 0 {
             roops += 1;
 
-            next = (target_coord.0 + angle.0, target_coord.1 + angle.1);
+            next = (
+                target_coord.0 + angle.0 as isize,
+                target_coord.1 + angle.1 as isize,
+            );
 
             if next.0 < 0 || 5 as isize <= next.0 || next.1 < 0 || 5 as isize <= next.1 {
                 target = 0;
@@ -486,8 +466,8 @@ fn _play_vidro() {
             match set_re.captures(&read_buf) {
                 Some(caps) => {
                     let coord = (
-                        caps[1].parse::<usize>().unwrap(),
-                        caps[2].parse::<usize>().unwrap(),
+                        caps[1].parse::<u64>().unwrap(),
+                        caps[2].parse::<u64>().unwrap(),
                     );
 
                     match vidro.set_ohajiki(coord) {
@@ -505,8 +485,8 @@ fn _play_vidro() {
             match flick_re.captures(&read_buf) {
                 Some(caps) => {
                     let coord = (
-                        caps[1].parse::<usize>().unwrap(),
-                        caps[2].parse::<usize>().unwrap(),
+                        caps[1].parse::<u64>().unwrap(),
+                        caps[2].parse::<u64>().unwrap(),
                     );
                     let angle = caps[3].parse::<usize>().unwrap();
                     if angle < 8 {
