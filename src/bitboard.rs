@@ -167,7 +167,7 @@ impl Bitboard {
 
             //弾く操作を実行
             line_piece ^= target_bit; //target_bitを消す
-            line_piece >>= angle;
+            line_piece <<= angle;
             line_piece |= line & line.wrapping_neg(); //lineの最下位のbitを取得し追加
 
             //再配置
