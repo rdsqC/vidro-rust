@@ -88,11 +88,6 @@ impl Bitboard {
         }
     }
     pub fn new_initial() -> Self {
-        for i in 0..ANGLE_LINE.len() {
-            let mut title = String::from_str("ANGLE_LINE").unwrap();
-            title += &i.to_string();
-            Self::print_u64(&title, ANGLE_LINE[i]);
-        }
         Self {
             player_bods: [0; 2],
             piece_bod: 0,
