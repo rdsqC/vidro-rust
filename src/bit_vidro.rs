@@ -138,7 +138,30 @@ impl BitVidro {
             }
         } else {
             //右シフトで表す方向
-            line >>= (BITBOD_WIDTH * (4 - c) + (4 - r));
+            //駒の場所にlineの先端を移動する
+            line >>= BITBOD_WIDTH * (4 - c) + (4 - r);
+            line &= FIELD_BOD; //5*に収まるようにマスク
+            let mut line_piece = self.piece_bod & line;
+
+            //各駒のうちの駒種類の振り分けを記憶
+            let piece_order: u64 = unsafe { _pext_u64(self.player_bods[0], line_piece) };
+
+            //piece_bodとplayer_bodsの中のlineに被るところを消す
+            self.piece_bod &= !line;
+            self.player_bods[0] &= !line;
+            self.player_bods[1] &= !line;
+
+            //弾く操作を実行
+            line_piece ^= target_bit; //target_bitを消す
+            line_piece >>= angle;
+            line_piece |= line & line.wrapping_neg(); //lineの最下位のbitを取得し追加
+
+            //再配置
+            self.piece_bod |= line_piece;
+            unsafe {
+                self.player_bods[0] |= _pdep_u64(piece_order, self.piece_bod);
+                self.player_bods[1] |= _pdep_u64(piece_order, self.piece_bod);
+            }
         }
     }
 }
