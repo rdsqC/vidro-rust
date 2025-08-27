@@ -45,7 +45,7 @@ impl BitboardConsole for Bitboard {
 
         buf += "\n--------------------";
         buf += "\nnow turn player: ";
-        buf += &self.turn_player.to_string();
+        buf += &((-self.turn + 1) / 2).to_string();
         buf += "\n";
 
         buf += "  0 1 2 3 4\n";
@@ -55,7 +55,10 @@ impl BitboardConsole for Bitboard {
             for r in 0..FIELD_BOD_WIDTH {
                 buf += "\u{001b}[";
                 buf += &(31 + ((self.player_bods[1] >> (c * BITBOD_WIDTH + r)) & 0b1)).to_string();
-                buf += if (self.piece_bod >> (c * BITBOD_WIDTH + r)) & 0b1 == 0 {
+                buf += if ((self.player_bods[0] | self.player_bods[1]) >> (c * BITBOD_WIDTH + r))
+                    & 0b1
+                    == 0
+                {
                     r"m  "
                 } else {
                     r"m ●"
@@ -115,7 +118,7 @@ impl BitboardConsole for Bitboard {
         buf += "\nfinal display:";
         buf += "\n--------------------";
         buf += "\nnow turn player: ";
-        buf += &self.turn_player.to_string();
+        buf += &((-self.turn + 1) / 2).to_string();
         buf += "\n";
 
         buf += "  0 1 2 3 4\n";
@@ -125,7 +128,10 @@ impl BitboardConsole for Bitboard {
             for r in 0..BITBOD_WIDTH {
                 buf += "\u{001b}[";
                 buf += &(31 + ((self.player_bods[1] >> (c * BITBOD_WIDTH + r)) & 0b1)).to_string();
-                buf += if (self.piece_bod >> (c * BITBOD_WIDTH + r)) & 0b1 == 0 {
+                buf += if ((self.player_bods[0] | self.player_bods[1]) >> (c * BITBOD_WIDTH + r))
+                    & 0b1
+                    == 0
+                {
                     r"m  "
                 } else {
                     r"m ●"
@@ -150,7 +156,10 @@ impl BitboardConsole for Bitboard {
             buf += &c.to_string();
 
             for r in 0..BITBOD_WIDTH {
-                buf += if (self.piece_bod >> (c * BITBOD_WIDTH + r)) & 0b1 == 0 {
+                buf += if ((self.player_bods[0] | self.player_bods[1]) >> (c * BITBOD_WIDTH + r))
+                    & 0b1
+                    == 0
+                {
                     r"  "
                 } else {
                     r" ●"
@@ -158,7 +167,10 @@ impl BitboardConsole for Bitboard {
             }
             buf += "\n";
         }
-        buf += &format!("binaly: {}", format_with_underscores(self.piece_bod));
+        buf += &format!(
+            "binaly: {}",
+            format_with_underscores(self.player_bods[0] | self.player_bods[1])
+        );
 
         buf += "\nself.turn_player[0]\n";
         buf += "  0 1 2 3 4\n";
