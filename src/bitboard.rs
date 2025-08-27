@@ -4,7 +4,7 @@ use std::str::FromStr;
 #[derive(Debug)]
 pub struct Bitboard {
     pub player_bods: [u64; 2],
-    pub have_piece: [i64; 2],
+    pub have_piece: [u8; 2],
     pub turn: i8,
 }
 
@@ -87,8 +87,8 @@ impl Bitboard {
         Self {
             player_bods,
             have_piece: [
-                5 - player_bods[0].count_ones() as i64,
-                5 - player_bods[1].count_ones() as i64,
+                5 - player_bods[0].count_ones() as u8,
+                5 - player_bods[1].count_ones() as u8,
             ],
             turn,
             // turn_player: ((-turn + 1) / 2) as u8,
@@ -295,5 +295,47 @@ impl Bitboard {
             target_bit & (self.player_bods[0] | self.player_bods[1]) == target_bit,
             "target_bit is protrude beyand piece_bod"
         );
+    }
+    pub fn generate_legal_move(&self, prev_move: MoveBit) -> Vec<MoveBit> {
+        let mut result = Vec::new();
+        let turn_player = ((-self.turn + 1) / 2) as usize;
+
+        //setの合法手を集める
+        let mut can_set_bod = !self.player_bods[turn_player];
+        for angle in ANGLE {
+            can_set_bod &= can_set_bod << angle;
+            can_set_bod &= can_set_bod >> angle;
+        }
+        can_set_bod &= !self.player_bods[1 - turn_player];
+        can_set_bod &= FIELD_BOD;
+        for r in 0..FIELD_BOD_HEIGHT as u8 {
+            for c in 0..FIELD_BOD_WIDTH as u8 {
+                let idx = r * BITBOD_WIDTH as u8 + c;
+                if (can_set_bod << idx) & 0b1 == 1 {
+                    result.push(MoveBit::new(r, c, 8));
+                }
+            }
+        }
+
+        //flickの合法手を集める
+        let blank: u64 = FIELD_BOD & !(self.player_bods[0] | self.player_bods[1]); //空白マス
+        for angle_idx in 0..ANGLE.len() as u8 {
+            let angle = ANGLE[angle_idx as usize];
+            let can_flick_bod1 = self.player_bods[turn_player] & (blank << angle);
+            let can_flick_bod2 = self.player_bods[turn_player] & (blank >> angle);
+            for r in 0..FIELD_BOD_HEIGHT as u8 {
+                for c in 0..FIELD_BOD_WIDTH as u8 {
+                    let idx = r * BITBOD_WIDTH as u8 + c;
+                    if (can_flick_bod1 << idx) & 0b1 == 1 {
+                        result.push(MoveBit::new(r, c, angle_idx));
+                    }
+                    if (can_flick_bod2 << idx) & 0b1 == 1 {
+                        result.push(MoveBit::new(r, c, angle_idx + 4));
+                    }
+                }
+            }
+        }
+
+        result
     }
 }
