@@ -95,4 +95,11 @@ impl BitVidro {
         self.turn = -self.turn;
         self.turn_player = 1 - self.turn_player;
     }
+    pub fn apply_force(mv: &Move) {}
+    pub fn set_force(&mut self, c: u64, r: u64) {
+        self.player_bods[self.turn_player] |= 1u64 << (c * BITBOD_WIDTH + r);
+        self.piece_bod |= 1u64 << (c * BITBOD_WIDTH + r);
+        self.have_piece[self.turn_player] -= 1;
+        self.turn_change();
+    }
 }
