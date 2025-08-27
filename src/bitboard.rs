@@ -95,7 +95,16 @@ impl Bitboard {
         self.turn = -self.turn;
         self.turn_player = 1 - self.turn_player;
     }
-    pub fn apply_force(mv: &Move) {}
+    pub fn apply_force(&mut self, mv: &Move) {
+        match mv {
+            &Move::Place { r, c } => {
+                self.set_force(c, r);
+            }
+            &Move::Flick { r, c, angle_idx } => {
+                self.flick_force(c, r, angle_idx);
+            }
+        }
+    }
     pub fn set_force(&mut self, c: u64, r: u64) {
         self.player_bods[self.turn_player] |= 1u64 << (c * BITBOD_WIDTH + r);
         self.piece_bod |= 1u64 << (c * BITBOD_WIDTH + r);
