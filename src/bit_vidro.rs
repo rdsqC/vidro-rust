@@ -125,10 +125,10 @@ impl BitVidro {
             self.player_bods[0] &= !line;
             self.player_bods[1] &= !line;
 
-            //弾く操作をシミュレーション
+            //弾く操作を実行
             line_piece ^= target_bit; //target_bitを消す。
             line_piece >>= angle;
-            line_piece |= line & line.wrapping_neg(); //lineの最下位のbitを取得し追加
+            line_piece |= line & !(line >> angle); //lineの最上位のbitを取得し追加
 
             //再配置
             self.piece_bod |= line_piece;
