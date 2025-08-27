@@ -111,8 +111,13 @@ impl Bitboard {
         }
     }
     pub fn set_force(&mut self, r: u64, c: u64) {
-        self.player_bods[self.turn_player] |= 1u64 << (r * BITBOD_WIDTH + c);
-        self.piece_bod |= 1u64 << (r * BITBOD_WIDTH + c);
+        let target_bit = 1u64 << (BITBOD_WIDTH * r + c);
+        debug_assert!(
+            (1u64 << (r * BITBOD_WIDTH + c) | self.piece_bod) != self.piece_bod,
+            "target_bit is within the bit sequence piece_bod"
+        );
+        self.player_bods[self.turn_player] |= target_bit;
+        self.piece_bod |= target_bit;
         self.have_piece[self.turn_player] -= 1;
         self.turn_change();
     }
