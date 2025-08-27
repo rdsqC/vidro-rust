@@ -1,5 +1,5 @@
-mod bit_vidro;
-use crate::bit_vidro::{BitVidro, Move};
+mod bitboard;
+use crate::bitboard::{BitBoard, Move};
 use Vec;
 use lru::LruCache;
 use regex::Regex;
