@@ -31,7 +31,7 @@ impl BitboardConsole for Bitboard {
 
             for r in 0..FIELD_BOD_WIDTH {
                 buf += "\u{001b}[";
-                buf += &(31 + ((self.player_bods[0] >> (c * BITBOD_WIDTH + r)) & 0b1)).to_string();
+                buf += &(31 + ((self.player_bods[1] >> (c * BITBOD_WIDTH + r)) & 0b1)).to_string();
                 buf += if (self.piece_bod >> (c * BITBOD_WIDTH + r)) & 0b1 == 0 {
                     r"m  "
                 } else {
