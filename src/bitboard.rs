@@ -117,6 +117,13 @@ impl Bitboard {
             self.set_force(mv);
         }
     }
+    pub fn undo_force(&mut self, mv: MoveBit) {
+        if mv.angle_idx < 8 {
+            self.flick_undo_force(mv);
+        } else {
+            self.set_undo_force(mv);
+        }
+    }
     pub fn set_force(&mut self, mv: MoveBit) {
         let target_bit = 1u64 << mv.idx;
         debug_assert!(
@@ -224,5 +231,94 @@ impl Bitboard {
             "player_bods[1] is protrude beyond FIELD_BOD"
         );
         self.turn_change();
+    }
+    pub fn set_undo_force(&mut self, mv: MoveBit) {
+        debug_assert!(
+            (1u64 << mv.idx | self.piece_bod) == self.piece_bod,
+            "target_bit is not within the bit sequence piece_bod"
+        );
+        self.turn_change();
+        let target_bit = 1u64 << mv.idx;
+        self.player_bods[self.turn_player] &= !target_bit;
+        self.piece_bod &= !target_bit;
+        self.have_piece[self.turn_player] += 1;
+        debug_assert!(
+            self.piece_bod | FIELD_BOD == FIELD_BOD,
+            "piece_bod is protrude beyond FIELD_BOD"
+        );
+        debug_assert!(
+            self.player_bods[0] | FIELD_BOD == FIELD_BOD,
+            "player_bods[0] is protrude beyond FIELD_BOD"
+        );
+        debug_assert!(
+            self.player_bods[1] | FIELD_BOD == FIELD_BOD,
+            "player_bods[1] is protrude beyond FIELD_BOD"
+        );
+    }
+    pub fn flick_undo_force(&mut self, mv: MoveBit) {
+        self.turn_change();
+        use std::arch::x86_64::{_pdep_u64, _pext_u64};
+
+        let angle = ANGLE[mv.angle_idx as usize % 4];
+        let is_positive_angle = mv.angle_idx < 4;
+        let mut line = ANGLE_LINE[mv.angle_idx as usize];
+        let target_bit = 1u64 << mv.idx;
+
+        if is_positive_angle {
+            //左シフトで表す方向
+            //駒の場所にlineの先端を移動する
+            line <<= mv.idx;
+
+            line &= FIELD_BOD; //5*5に収まるようにマスク
+            let mut line_piece = self.piece_bod & line;
+
+            //再配置を取り消す
+            let piece_order = unsafe { _pext_u64(self.player_bods[0], line_piece) }; //順序記憶
+            self.piece_bod &= !line;
+            self.player_bods[0] &= !line;
+            self.player_bods[1] &= !line;
+
+            //弾く操作の逆を実行
+            line_piece &= !(line & !(line >> angle)); //lineの最上位のbitを取得し削除
+            line_piece <<= angle;
+            line_piece |= target_bit; //target_bitを追加
+
+            //再配置
+            self.piece_bod |= line_piece;
+            unsafe {
+                self.player_bods[0] |= _pdep_u64(piece_order, line_piece);
+                self.player_bods[1] |= _pdep_u64(!piece_order, line_piece);
+            }
+        } else {
+            //右シフトで表す方向
+            //駒の場所にlineの先端を移動する
+            line >>= (BITBOD_WIDTH * (FIELD_BOD_HEIGHT - 1) + FIELD_BOD_WIDTH - 1) as u8 - mv.idx;
+            line &= FIELD_BOD; //5*5に収まるようにマスク
+            let mut line_piece = self.piece_bod & line;
+
+            //再配置を取り消す
+            let piece_order: u64 = unsafe { _pext_u64(self.player_bods[0], line_piece) }; //順序記憶
+            //piece_bodとplayer_bodsの中のlineに被るところを消す
+            self.piece_bod &= !line;
+            self.player_bods[0] &= !line;
+            self.player_bods[1] &= !line;
+
+            //弾く操作の逆を実行
+            line_piece &= !(line & line.wrapping_neg()); //lineの最下位のbitを取得し削除
+            line_piece >>= angle;
+            line_piece |= target_bit; //target_bitを追加
+
+            //再配置
+            self.piece_bod |= line_piece;
+            unsafe {
+                self.player_bods[0] |= _pdep_u64(piece_order, line_piece);
+                self.player_bods[1] |= _pdep_u64(!piece_order, line_piece);
+            }
+        }
+
+        debug_assert!(
+            target_bit & self.piece_bod == target_bit,
+            "target_bit is protrude beyand piece_bod"
+        );
     }
 }
