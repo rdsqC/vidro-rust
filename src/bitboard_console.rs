@@ -1,4 +1,4 @@
-use crate::bitboard::{BITBOD_WIDTH, Bitboard, Move};
+use crate::bitboard::{BITBOD_WIDTH, Bitboard, FIELD_BOD_HEIGHT, FIELD_BOD_WIDTH, Move};
 use regex::Regex;
 use std::io;
 
@@ -26,10 +26,10 @@ impl BitboardConsole for Bitboard {
         buf += "\n";
 
         buf += "  0 1 2 3 4\n";
-        for c in 0..5 {
+        for c in 0..FIELD_BOD_HEIGHT {
             buf += &c.to_string();
 
-            for r in 0..5 {
+            for r in 0..FIELD_BOD_WIDTH {
                 buf += "\u{001b}[";
                 buf += &(31 + ((self.player_bods[0] >> (c * BITBOD_WIDTH + r)) & 0b1)).to_string();
                 buf += if (self.piece_bod >> (c * BITBOD_WIDTH + r)) & 0b1 == 0 {
