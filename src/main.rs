@@ -1,16 +1,17 @@
 mod bitboard;
-use crate::bitboard::{BitBoard, Move};
+mod bitboard_console;
 use Vec;
+use bitboard::{Bitboard, Move};
+use bitboard_console::BitboardConsole;
 use lru::LruCache;
 use regex::Regex;
-use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions, metadata};
 use std::io::Write;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-use std::{clone, io, usize};
+use std::{io, usize};
 
 const ANGLES: [(i64, i64); 8] = [
     (0, 1),
