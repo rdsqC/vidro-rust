@@ -153,8 +153,8 @@ impl Bitboard {
         } else {
             //右シフトで表す方向
             //駒の場所にlineの先端を移動する
-            line >>= BITBOD_WIDTH * (4 - r) + (4 - c);
-            line &= FIELD_BOD; //5*に収まるようにマスク
+            line >>= BITBOD_WIDTH * (FIELD_BOD_HEIGHT - 1 - r) + (FIELD_BOD_WIDTH - 1 - c);
+            line &= FIELD_BOD; //5*5に収まるようにマスク
             let mut line_piece = self.piece_bod & line;
 
             //各駒のうちの駒種類の振り分けを記憶
