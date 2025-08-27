@@ -1,9 +1,12 @@
-pub struct BitBoard {
-    player_bods: [u64; 2],
-    piece_bod: u64,
-    have_piece: [i64; 2],
-    turn: i64,
-    turn_player: usize,
+use regex::Regex;
+use std::io;
+
+pub struct Bitboard {
+    pub player_bods: [u64; 2],
+    pub piece_bod: u64,
+    pub have_piece: [i64; 2],
+    pub turn: i64,
+    pub turn_player: usize,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
@@ -69,7 +72,7 @@ const ANGLE_LINE: [u64; 8] = {
     result
 };
 
-impl BitBoard {
+impl Bitboard {
     pub fn new(player_bods: [u64; 2], turn: i64) -> Self {
         Self {
             player_bods,
@@ -164,7 +167,23 @@ impl BitBoard {
             }
         }
     }
-    pub fn to_string(&self) -> String {
+}
+
+fn read_buffer() -> String {
+    let mut buffer = String::new();
+    io::stdin()
+        .read_line(&mut buffer)
+        .expect("Failed to read line.");
+    buffer.trim().to_string()
+}
+
+pub trait BitboardConsole {
+    fn to_string(&self) -> String;
+    fn read_to_move() -> Move;
+}
+
+impl BitboardConsole for Bitboard {
+    fn to_string(&self) -> String {
         const COLOR_RESET: &str = "\u{001b}[0m";
         let mut buf = String::new();
 
@@ -200,6 +219,35 @@ impl BitBoard {
 
         return buf;
     }
-}
+    fn read_to_move() -> Move {
+        let set_re = Regex::new(r"S\s+(\d+)\s+(\d+)").unwrap();
+        let flick_re = Regex::new(r"F\s+(\d+)\s+(\d+)\s+(\d)").unwrap();
 
-pub trait Bit {}
+        loop {
+            let read_buf = read_buffer();
+
+            match set_re.captures(&read_buf) {
+                Some(caps) => {
+                    return Move::Place {
+                        r: caps[1].parse::<u64>().unwrap(),
+                        c: caps[2].parse::<u64>().unwrap(),
+                    };
+                }
+                None => (),
+            }
+            match flick_re.captures(&read_buf) {
+                Some(caps) => {
+                    return Move::Flick {
+                        r: caps[1].parse::<u64>().unwrap(),
+                        c: caps[2].parse::<u64>().unwrap(),
+                        angle_idx: caps[3].parse::<usize>().unwrap(),
+                    };
+                }
+                None => (),
+            }
+            println!(
+                "コマンドの読み取りに失敗しました。\ncommands:\n    set y/x\n    flick y/x angle"
+            );
+        }
+    }
+}
