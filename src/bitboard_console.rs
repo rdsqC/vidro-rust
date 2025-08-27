@@ -53,8 +53,8 @@ impl BitboardConsole for Bitboard {
         return buf;
     }
     fn read_to_move() -> Move {
-        let set_re = Regex::new(r"S\s+(\d+)\s+(\d+)").unwrap();
-        let flick_re = Regex::new(r"F\s+(\d+)\s+(\d+)\s+(\d)").unwrap();
+        let set_re = Regex::new(r"[sS]\s+(\d+)\s+(\d+)").unwrap();
+        let flick_re = Regex::new(r"[fF]\s+(\d+)\s+(\d+)\s+(\d)").unwrap();
 
         loop {
             let read_buf = read_buffer();
