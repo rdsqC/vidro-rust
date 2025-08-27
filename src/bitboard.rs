@@ -128,6 +128,7 @@ impl Bitboard {
             //左シフトで表す方向
             //駒の場所にlineの先端を移動する
             line <<= BITBOD_WIDTH * r + c;
+
             line &= FIELD_BOD; //5*5に収まるようにマスク
             let mut line_piece = self.piece_bod & line;
 
@@ -173,8 +174,8 @@ impl Bitboard {
             //再配置
             self.piece_bod |= line_piece;
             unsafe {
-                self.player_bods[0] |= _pdep_u64(piece_order, self.piece_bod);
-                self.player_bods[1] |= _pdep_u64(piece_order, self.piece_bod);
+                self.player_bods[0] |= _pdep_u64(piece_order, line_piece);
+                self.player_bods[1] |= _pdep_u64(!piece_order, line_piece);
             }
         }
         self.turn_change();
