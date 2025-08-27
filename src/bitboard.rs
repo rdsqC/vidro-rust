@@ -172,5 +172,6 @@ impl Bitboard {
                 self.player_bods[1] |= _pdep_u64(piece_order, self.piece_bod);
             }
         }
+        self.turn_change();
     }
 }
