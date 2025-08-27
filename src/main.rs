@@ -402,6 +402,36 @@ fn read_buffer() -> String {
 
 const COLOR_RESET: &str = "\u{001b}[0m";
 
+fn read_move() -> Move {
+    let set_re = Regex::new(r"S\s+(\d+)\s+(\d+)").unwrap();
+    let flick_re = Regex::new(r"F\s+(\d+)\s+(\d+)\s+(\d)").unwrap();
+
+    loop {
+        let read_buf = read_buffer();
+
+        match set_re.captures(&read_buf) {
+            Some(caps) => {
+                return Move::Place {
+                    r: caps[1].parse::<u64>().unwrap(),
+                    c: caps[2].parse::<u64>().unwrap(),
+                };
+            }
+            None => (),
+        }
+        match flick_re.captures(&read_buf) {
+            Some(caps) => {
+                return Move::Flick {
+                    r: caps[1].parse::<u64>().unwrap(),
+                    c: caps[2].parse::<u64>().unwrap(),
+                    angle_idx: caps[3].parse::<usize>().unwrap(),
+                };
+            }
+            None => (),
+        }
+        println!("コマンドの読み取りに失敗しました。\ncommands:\n    set y/x\n    flick y/x angle");
+    }
+}
+
 fn _play_vidro() {
     let mut vidro = Vidro::new(0);
     let mut buf = String::new();
