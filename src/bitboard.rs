@@ -4,10 +4,8 @@ use std::str::FromStr;
 #[derive(Debug)]
 pub struct Bitboard {
     pub player_bods: [u64; 2],
-    pub piece_bod: u64,
     pub have_piece: [i64; 2],
-    pub turn: i64,
-    pub turn_player: usize,
+    pub turn: i8,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -85,30 +83,26 @@ const ANGLE_LINE: [u64; 8] = {
 };
 
 impl Bitboard {
-    pub fn new(player_bods: [u64; 2], turn: i64) -> Self {
+    pub fn new(player_bods: [u64; 2], turn: i8) -> Self {
         Self {
             player_bods,
-            piece_bod: player_bods[0] | player_bods[1],
             have_piece: [
                 5 - player_bods[0].count_ones() as i64,
                 5 - player_bods[1].count_ones() as i64,
             ],
             turn,
-            turn_player: ((-turn + 1) / 2) as usize,
+            // turn_player: ((-turn + 1) / 2) as u8,
         }
     }
     pub fn new_initial() -> Self {
         Self {
             player_bods: [0; 2],
-            piece_bod: 0,
             have_piece: [5; 2],
             turn: 1,
-            turn_player: 0,
         }
     }
     pub fn turn_change(&mut self) {
         self.turn = -self.turn;
-        self.turn_player = 1 - self.turn_player;
     }
     pub fn apply_force(&mut self, mv: MoveBit) {
         if mv.angle_idx < 8 {
@@ -125,19 +119,16 @@ impl Bitboard {
         }
     }
     pub fn set_force(&mut self, mv: MoveBit) {
+        let turn_player = ((-self.turn + 1) / 2) as usize;
         let target_bit = 1u64 << mv.idx;
         debug_assert!(
-            (1u64 << mv.idx | self.piece_bod) != self.piece_bod,
+            (1u64 << mv.idx | (self.player_bods[0] | self.player_bods[1]))
+                != self.player_bods[0] | self.player_bods[1],
             "target_bit is within the bit sequence piece_bod"
         );
-        self.player_bods[self.turn_player] |= target_bit;
-        self.piece_bod |= target_bit;
-        self.have_piece[self.turn_player] -= 1;
+        self.player_bods[turn_player] |= target_bit;
+        self.have_piece[turn_player] -= 1;
         self.turn_change();
-        debug_assert!(
-            self.piece_bod | FIELD_BOD == FIELD_BOD,
-            "piece_bod is protrude beyond FIELD_BOD"
-        );
         debug_assert!(
             self.player_bods[0] | FIELD_BOD == FIELD_BOD,
             "player_bods[0] is protrude beyond FIELD_BOD"
@@ -156,7 +147,7 @@ impl Bitboard {
         let target_bit = 1u64 << mv.idx;
 
         debug_assert!(
-            target_bit & self.piece_bod == target_bit,
+            target_bit & (self.player_bods[0] | self.player_bods[1]) == target_bit,
             "target_bit is protrude beyand piece_bod"
         );
 
@@ -166,13 +157,12 @@ impl Bitboard {
             line <<= mv.idx;
 
             line &= FIELD_BOD; //5*5に収まるようにマスク
-            let mut line_piece = self.piece_bod & line;
+            let mut line_piece = (self.player_bods[0] | self.player_bods[1]) & line;
 
             //各駒のうちの駒種類の振り分けを記憶
             let piece_order: u64 = unsafe { _pext_u64(self.player_bods[0], line_piece) };
 
             //piece_bodとplayer_bodsの中のlineに被るところを消す
-            self.piece_bod &= !line;
             self.player_bods[0] &= !line;
             self.player_bods[1] &= !line;
 
@@ -182,7 +172,6 @@ impl Bitboard {
             line_piece |= line & !(line >> angle); //lineの最上位のbitを取得し追加
 
             //再配置
-            self.piece_bod |= line_piece;
             unsafe {
                 self.player_bods[0] |= _pdep_u64(piece_order, line_piece);
                 self.player_bods[1] |= _pdep_u64(!piece_order, line_piece);
@@ -192,13 +181,12 @@ impl Bitboard {
             //駒の場所にlineの先端を移動する
             line >>= (BITBOD_WIDTH * (FIELD_BOD_HEIGHT - 1) + FIELD_BOD_WIDTH - 1) as u8 - mv.idx;
             line &= FIELD_BOD; //5*5に収まるようにマスク
-            let mut line_piece = self.piece_bod & line;
+            let mut line_piece = (self.player_bods[0] | self.player_bods[1]) & line;
 
             //各駒のうちの駒種類の振り分けを記憶
             let piece_order: u64 = unsafe { _pext_u64(self.player_bods[0], line_piece) };
 
             //piece_bodとplayer_bodsの中のlineに被るところを消す
-            self.piece_bod &= !line;
             self.player_bods[0] &= !line;
             self.player_bods[1] &= !line;
 
@@ -208,7 +196,6 @@ impl Bitboard {
             line_piece |= line & line.wrapping_neg(); //lineの最下位のbitを取得し追加
 
             //再配置
-            self.piece_bod |= line_piece;
             unsafe {
                 self.player_bods[0] |= _pdep_u64(piece_order, line_piece);
                 self.player_bods[1] |= _pdep_u64(!piece_order, line_piece);
@@ -217,10 +204,6 @@ impl Bitboard {
         debug_assert!(
             self.player_bods[0] & self.player_bods[1] == 0,
             "bod of first player and bod of second player overlap"
-        );
-        debug_assert!(
-            self.piece_bod | FIELD_BOD == FIELD_BOD,
-            "piece_bod is protrude beyond FIELD_BOD"
         );
         debug_assert!(
             self.player_bods[0] | FIELD_BOD == FIELD_BOD,
@@ -234,18 +217,15 @@ impl Bitboard {
     }
     pub fn set_undo_force(&mut self, mv: MoveBit) {
         debug_assert!(
-            (1u64 << mv.idx | self.piece_bod) == self.piece_bod,
+            (1u64 << mv.idx | (self.player_bods[0] | self.player_bods[1]))
+                == (self.player_bods[0] | self.player_bods[1]),
             "target_bit is not within the bit sequence piece_bod"
         );
         self.turn_change();
+        let turn_player = ((-self.turn + 1) / 2) as usize;
         let target_bit = 1u64 << mv.idx;
-        self.player_bods[self.turn_player] &= !target_bit;
-        self.piece_bod &= !target_bit;
-        self.have_piece[self.turn_player] += 1;
-        debug_assert!(
-            self.piece_bod | FIELD_BOD == FIELD_BOD,
-            "piece_bod is protrude beyond FIELD_BOD"
-        );
+        self.player_bods[turn_player] &= !target_bit;
+        self.have_piece[turn_player] += 1;
         debug_assert!(
             self.player_bods[0] | FIELD_BOD == FIELD_BOD,
             "player_bods[0] is protrude beyond FIELD_BOD"
@@ -263,18 +243,16 @@ impl Bitboard {
         let is_positive_angle = mv.angle_idx < 4;
         let mut line = ANGLE_LINE[mv.angle_idx as usize];
         let target_bit = 1u64 << mv.idx;
-
         if is_positive_angle {
             //左シフトで表す方向
             //駒の場所にlineの先端を移動する
             line <<= mv.idx;
 
             line &= FIELD_BOD; //5*5に収まるようにマスク
-            let mut line_piece = self.piece_bod & line;
+            let mut line_piece = (self.player_bods[0] | self.player_bods[1]) & line;
 
             //再配置を取り消す
             let piece_order = unsafe { _pext_u64(self.player_bods[0], line_piece) }; //順序記憶
-            self.piece_bod &= !line;
             self.player_bods[0] &= !line;
             self.player_bods[1] &= !line;
 
@@ -284,7 +262,6 @@ impl Bitboard {
             line_piece |= target_bit; //target_bitを追加
 
             //再配置
-            self.piece_bod |= line_piece;
             unsafe {
                 self.player_bods[0] |= _pdep_u64(piece_order, line_piece);
                 self.player_bods[1] |= _pdep_u64(!piece_order, line_piece);
@@ -294,12 +271,11 @@ impl Bitboard {
             //駒の場所にlineの先端を移動する
             line >>= (BITBOD_WIDTH * (FIELD_BOD_HEIGHT - 1) + FIELD_BOD_WIDTH - 1) as u8 - mv.idx;
             line &= FIELD_BOD; //5*5に収まるようにマスク
-            let mut line_piece = self.piece_bod & line;
+            let mut line_piece = (self.player_bods[0] | self.player_bods[1]) & line;
 
             //再配置を取り消す
             let piece_order: u64 = unsafe { _pext_u64(self.player_bods[0], line_piece) }; //順序記憶
             //piece_bodとplayer_bodsの中のlineに被るところを消す
-            self.piece_bod &= !line;
             self.player_bods[0] &= !line;
             self.player_bods[1] &= !line;
 
@@ -309,7 +285,6 @@ impl Bitboard {
             line_piece |= target_bit; //target_bitを追加
 
             //再配置
-            self.piece_bod |= line_piece;
             unsafe {
                 self.player_bods[0] |= _pdep_u64(piece_order, line_piece);
                 self.player_bods[1] |= _pdep_u64(!piece_order, line_piece);
@@ -317,7 +292,7 @@ impl Bitboard {
         }
 
         debug_assert!(
-            target_bit & self.piece_bod == target_bit,
+            target_bit & (self.player_bods[0] | self.player_bods[1]) == target_bit,
             "target_bit is protrude beyand piece_bod"
         );
     }
