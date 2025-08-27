@@ -1,7 +1,7 @@
 mod bitboard;
 mod bitboard_console;
 use Vec;
-use bitboard::{Bitboard, Move};
+use bitboard::Bitboard;
 use bitboard_console::BitboardConsole;
 use lru::LruCache;
 use regex::Regex;
@@ -12,6 +12,21 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use std::{io, usize};
+
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub enum Move {
+    Place { r: u64, c: u64 },
+    Flick { r: u64, c: u64, angle_idx: usize },
+}
+
+impl Move {
+    pub fn to_string(&self) -> String {
+        match self {
+            Move::Place { r, c } => format!("S({},{})", r, c),
+            Move::Flick { r, c, angle_idx } => format!("F({},{},{})", r, c, angle_idx),
+        }
+    }
+}
 
 const ANGLES: [(i64, i64); 8] = [
     (0, 1),
@@ -1633,7 +1648,7 @@ fn main() {
     loop {
         // println!("{}", bit_vidro.to_string());
         bit_vidro.print_data();
-        bit_vidro.apply_force(&Bitboard::read_to_move());
+        bit_vidro.apply_force(Bitboard::read_to_move());
     }
 
     // _play_vidro();

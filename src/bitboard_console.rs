@@ -1,4 +1,4 @@
-use crate::bitboard::{BITBOD_WIDTH, Bitboard, FIELD_BOD_HEIGHT, FIELD_BOD_WIDTH, Move};
+use crate::bitboard::{BITBOD_WIDTH, Bitboard, FIELD_BOD_HEIGHT, FIELD_BOD_WIDTH, MoveBit};
 use regex::Regex;
 use std::io;
 
@@ -33,7 +33,7 @@ fn format_with_underscores(n: u64) -> String {
 
 pub trait BitboardConsole {
     fn to_string(&self) -> String;
-    fn read_to_move() -> Move;
+    fn read_to_move() -> MoveBit;
     fn print_data(&self) -> ();
     fn print_u64(title: &str, n: u64) -> ();
 }
@@ -75,7 +75,7 @@ impl BitboardConsole for Bitboard {
 
         return buf;
     }
-    fn read_to_move() -> Move {
+    fn read_to_move() -> MoveBit {
         let set_re = Regex::new(r"[sS]\s+(\d+)\s+(\d+)").unwrap();
         let flick_re = Regex::new(r"[fF]\s+(\d+)\s+(\d+)\s+(\d)").unwrap();
 
@@ -84,20 +84,21 @@ impl BitboardConsole for Bitboard {
 
             match set_re.captures(&read_buf) {
                 Some(caps) => {
-                    return Move::Place {
-                        r: caps[1].parse::<u64>().unwrap(),
-                        c: caps[2].parse::<u64>().unwrap(),
-                    };
+                    return MoveBit::new(
+                        caps[1].parse::<u8>().unwrap(),
+                        caps[2].parse::<u8>().unwrap(),
+                        8,
+                    );
                 }
                 None => (),
             }
             match flick_re.captures(&read_buf) {
                 Some(caps) => {
-                    return Move::Flick {
-                        r: caps[1].parse::<u64>().unwrap(),
-                        c: caps[2].parse::<u64>().unwrap(),
-                        angle_idx: caps[3].parse::<usize>().unwrap(),
-                    };
+                    return MoveBit::new(
+                        caps[1].parse::<u8>().unwrap(),
+                        caps[2].parse::<u8>().unwrap(),
+                        caps[3].parse::<u8>().unwrap(),
+                    );
                 }
                 None => (),
             }

@@ -10,17 +10,27 @@ pub struct Bitboard {
     pub turn_player: usize,
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Debug)]
-pub enum Move {
-    Place { r: u64, c: u64 },
-    Flick { r: u64, c: u64, angle_idx: usize },
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct MoveBit {
+    idx: u8,
+    angle_idx: u8, //8以上のときはset
 }
 
-impl Move {
+impl MoveBit {
     pub fn to_string(&self) -> String {
-        match self {
-            Move::Place { r, c } => format!("S({},{})", r, c),
-            Move::Flick { r, c, angle_idx } => format!("F({},{},{})", r, c, angle_idx),
+        let r = self.angle_idx / 5;
+        let c = self.angle_idx % 5;
+        if self.angle_idx < 8 {
+            //flick
+            format!("F({},{},{})", r, c, self.angle_idx)
+        } else {
+            format!("S({},{})", r, c)
+        }
+    }
+    pub fn new(r: u8, c: u8, idx: u8) -> MoveBit {
+        MoveBit {
+            idx: r * BITBOD_WIDTH as u8 + c,
+            angle_idx: idx,
         }
     }
 }
@@ -100,34 +110,43 @@ impl Bitboard {
         self.turn = -self.turn;
         self.turn_player = 1 - self.turn_player;
     }
-    pub fn apply_force(&mut self, mv: &Move) {
-        match mv {
-            &Move::Place { r, c } => {
-                self.set_force(r, c);
-            }
-            &Move::Flick { r, c, angle_idx } => {
-                self.flick_force(r, c, angle_idx);
-            }
+    pub fn apply_force(&mut self, mv: MoveBit) {
+        if mv.angle_idx < 8 {
+            self.flick_force(mv);
+        } else {
+            self.set_force(mv);
         }
     }
-    pub fn set_force(&mut self, r: u64, c: u64) {
-        let target_bit = 1u64 << (BITBOD_WIDTH * r + c);
+    pub fn set_force(&mut self, mv: MoveBit) {
+        let target_bit = 1u64 << mv.idx;
         debug_assert!(
-            (1u64 << (r * BITBOD_WIDTH + c) | self.piece_bod) != self.piece_bod,
+            (1u64 << mv.idx | self.piece_bod) != self.piece_bod,
             "target_bit is within the bit sequence piece_bod"
         );
         self.player_bods[self.turn_player] |= target_bit;
         self.piece_bod |= target_bit;
         self.have_piece[self.turn_player] -= 1;
         self.turn_change();
+        debug_assert!(
+            self.piece_bod | FIELD_BOD == FIELD_BOD,
+            "piece_bod is protrude beyond FIELD_BOD"
+        );
+        debug_assert!(
+            self.player_bods[0] | FIELD_BOD == FIELD_BOD,
+            "player_bods[0] is protrude beyond FIELD_BOD"
+        );
+        debug_assert!(
+            self.player_bods[1] | FIELD_BOD == FIELD_BOD,
+            "player_bods[1] is protrude beyond FIELD_BOD"
+        );
     }
-    pub fn flick_force(&mut self, r: u64, c: u64, angle_idx: usize) {
+    pub fn flick_force(&mut self, mv: MoveBit) {
         use std::arch::x86_64::{_pdep_u64, _pext_u64};
 
-        let angle = ANGLE[angle_idx % 4];
-        let is_positive_angle = angle_idx < 4;
-        let mut line = ANGLE_LINE[angle_idx];
-        let target_bit = 1u64 << (BITBOD_WIDTH * r + c);
+        let angle = ANGLE[mv.angle_idx as usize % 4];
+        let is_positive_angle = mv.angle_idx < 4;
+        let mut line = ANGLE_LINE[mv.angle_idx as usize];
+        let target_bit = 1u64 << mv.idx;
 
         debug_assert!(
             target_bit & self.piece_bod == target_bit,
@@ -137,7 +156,7 @@ impl Bitboard {
         if is_positive_angle {
             //左シフトで表す方向
             //駒の場所にlineの先端を移動する
-            line <<= BITBOD_WIDTH * r + c;
+            line <<= mv.idx;
 
             line &= FIELD_BOD; //5*5に収まるようにマスク
             let mut line_piece = self.piece_bod & line;
@@ -164,7 +183,7 @@ impl Bitboard {
         } else {
             //右シフトで表す方向
             //駒の場所にlineの先端を移動する
-            line >>= BITBOD_WIDTH * (FIELD_BOD_HEIGHT - 1 - r) + (FIELD_BOD_WIDTH - 1 - c);
+            line >>= (BITBOD_WIDTH * (FIELD_BOD_HEIGHT - 1) + FIELD_BOD_WIDTH - 1) as u8 - mv.idx;
             line &= FIELD_BOD; //5*5に収まるようにマスク
             let mut line_piece = self.piece_bod & line;
 
@@ -193,15 +212,15 @@ impl Bitboard {
             "bod of first player and bod of second player overlap"
         );
         debug_assert!(
-            self.piece_bod & FIELD_BOD == self.piece_bod,
+            self.piece_bod | FIELD_BOD == FIELD_BOD,
             "piece_bod is protrude beyond FIELD_BOD"
         );
         debug_assert!(
-            self.player_bods[0] & FIELD_BOD == self.player_bods[0],
+            self.player_bods[0] | FIELD_BOD == FIELD_BOD,
             "player_bods[0] is protrude beyond FIELD_BOD"
         );
         debug_assert!(
-            self.player_bods[1] & FIELD_BOD == self.player_bods[1],
+            self.player_bods[1] | FIELD_BOD == FIELD_BOD,
             "player_bods[1] is protrude beyond FIELD_BOD"
         );
         self.turn_change();
