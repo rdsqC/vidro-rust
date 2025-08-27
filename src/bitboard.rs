@@ -1,3 +1,6 @@
+use crate::bitboard_console::BitboardConsole;
+use std::str::FromStr;
+
 #[derive(Debug)]
 pub struct Bitboard {
     pub player_bods: [u64; 2],
@@ -59,10 +62,11 @@ const ANGLE_LINE: [u64; 8] = {
 
     // (4,4)を中心に回転させる4パターン
     let mut count = 4usize;
+    let top_corner_bit = 1u64 << (BITBOD_WIDTH * (FIELD_BOD_HEIGHT - 1) + FIELD_BOD_WIDTH - 1);
     while count < 8 {
         let mut steps = 0u64; //target_bit は含まない
         while steps < 5 {
-            result[count] |= (1u64 << 24) >> (ANGLE[count - 4] * steps);
+            result[count] |= top_corner_bit >> (ANGLE[count - 4] * steps);
             steps += 1;
         }
         count += 1;
@@ -84,6 +88,11 @@ impl Bitboard {
         }
     }
     pub fn new_initial() -> Self {
+        for i in 0..ANGLE_LINE.len() {
+            let mut title = String::from_str("ANGLE_LINE").unwrap();
+            title += &i.to_string();
+            Self::print_u64(&title, ANGLE_LINE[i]);
+        }
         Self {
             player_bods: [0; 2],
             piece_bod: 0,
