@@ -120,7 +120,7 @@ impl BitboardConsole for Bitboard {
         for c in 0..FIELD_BOD_HEIGHT {
             buf += &c.to_string();
 
-            for r in 0..FIELD_BOD_WIDTH {
+            for r in 0..BITBOD_WIDTH {
                 buf += "\u{001b}[";
                 buf += &(31 + ((self.player_bods[1] >> (c * BITBOD_WIDTH + r)) & 0b1)).to_string();
                 buf += if (self.piece_bod >> (c * BITBOD_WIDTH + r)) & 0b1 == 0 {
@@ -147,7 +147,7 @@ impl BitboardConsole for Bitboard {
         for c in 0..FIELD_BOD_HEIGHT {
             buf += &c.to_string();
 
-            for r in 0..FIELD_BOD_WIDTH {
+            for r in 0..BITBOD_WIDTH {
                 buf += if (self.piece_bod >> (c * BITBOD_WIDTH + r)) & 0b1 == 0 {
                     r"  "
                 } else {
@@ -163,7 +163,7 @@ impl BitboardConsole for Bitboard {
         for c in 0..FIELD_BOD_HEIGHT {
             buf += &c.to_string();
 
-            for r in 0..FIELD_BOD_WIDTH {
+            for r in 0..BITBOD_WIDTH {
                 buf += "\u{001b}[31m";
                 buf += if (self.player_bods[0] >> (c * BITBOD_WIDTH + r)) & 0b1 == 0 {
                     r"  "
@@ -181,7 +181,7 @@ impl BitboardConsole for Bitboard {
         for c in 0..FIELD_BOD_HEIGHT {
             buf += &c.to_string();
 
-            for r in 0..FIELD_BOD_WIDTH {
+            for r in 0..BITBOD_WIDTH {
                 buf += "\u{001b}[32m";
                 buf += if (self.player_bods[1] >> (c * BITBOD_WIDTH + r)) & 0b1 == 0 {
                     r"  "
