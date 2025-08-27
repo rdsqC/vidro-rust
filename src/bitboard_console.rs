@@ -79,7 +79,7 @@ impl BitboardConsole for Bitboard {
                 None => (),
             }
             println!(
-                "コマンドの読み取りに失敗しました。\ncommands:\n    set y/x\n    flick y/x angle"
+                "コマンドの読み取りに失敗しました。\ncommands:\n    S c r\n    F c r angle_idx"
             );
         }
     }
