@@ -1645,10 +1645,17 @@ fn find_best_move(
 
 fn main() {
     let mut bit_vidro = Bitboard::new_initial();
+    let mut count = 0;
     loop {
         // println!("{}", bit_vidro.to_string());
         bit_vidro.print_data();
-        bit_vidro.apply_force(Bitboard::read_to_move());
+        let mv = Bitboard::read_to_move();
+        bit_vidro.apply_force(mv);
+        if count > 3 {
+            bit_vidro.print_data();
+            bit_vidro.undo_force(mv);
+        }
+        count += 1;
     }
 
     // _play_vidro();
