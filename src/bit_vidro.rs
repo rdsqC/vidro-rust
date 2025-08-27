@@ -105,7 +105,7 @@ impl BitVidro {
     pub fn flick_force(&mut self, c: u64, r: u64, angle_idx: usize) {
         use std::arch::x86_64::{_pdep_u64, _pext_u64};
 
-        let angle = ANGLE[angle_idx];
+        let angle = ANGLE[angle_idx % 4];
         let is_positive_angle = angle_idx < 4;
         let mut line = ANGLE_LINE[angle_idx];
         let target_bit = 1u64 << (BITBOD_WIDTH * c + r);
