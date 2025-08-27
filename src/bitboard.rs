@@ -1,3 +1,4 @@
+#[derive(Debug)]
 pub struct Bitboard {
     pub player_bods: [u64; 2],
     pub piece_bod: u64,
