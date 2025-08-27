@@ -124,6 +124,11 @@ impl Bitboard {
         let mut line = ANGLE_LINE[angle_idx];
         let target_bit = 1u64 << (BITBOD_WIDTH * r + c);
 
+        debug_assert!(
+            target_bit & self.piece_bod == target_bit,
+            "target_bit is protrude beyand piece_bod"
+        );
+
         if is_positive_angle {
             //左シフトで表す方向
             //駒の場所にlineの先端を移動する
@@ -178,6 +183,22 @@ impl Bitboard {
                 self.player_bods[1] |= _pdep_u64(!piece_order, line_piece);
             }
         }
+        debug_assert!(
+            self.player_bods[0] & self.player_bods[1] == 0,
+            "bod of first player and bod of second player overlap"
+        );
+        debug_assert!(
+            self.piece_bod & FIELD_BOD == self.piece_bod,
+            "piece_bod is protrude beyond FIELD_BOD"
+        );
+        debug_assert!(
+            self.player_bods[0] & FIELD_BOD == self.player_bods[0],
+            "player_bods[0] is protrude beyond FIELD_BOD"
+        );
+        debug_assert!(
+            self.player_bods[1] & FIELD_BOD == self.player_bods[1],
+            "player_bods[1] is protrude beyond FIELD_BOD"
+        );
         self.turn_change();
     }
 }
