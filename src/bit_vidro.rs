@@ -7,7 +7,7 @@ pub struct BitVidro {
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
-enum Move {
+pub enum Move {
     Place { r: u64, c: u64 },
     Flick { r: u64, c: u64, angle_idx: usize },
 }
