@@ -141,7 +141,7 @@ impl BitboardConsole for Bitboard {
             buf += "\n";
         }
 
-        buf += "\nself.piece_bod";
+        buf += "\nself.piece_bod\n";
         buf += "  0 1 2 3 4\n";
         buf += COLOR_RESET;
         for c in 0..FIELD_BOD_HEIGHT {
@@ -158,7 +158,7 @@ impl BitboardConsole for Bitboard {
         }
         buf += &format!("binaly: {}", format_with_underscores(self.piece_bod));
 
-        buf += "\nself.turn_player[0]";
+        buf += "\nself.turn_player[0]\n";
         buf += "  0 1 2 3 4\n";
         for c in 0..FIELD_BOD_HEIGHT {
             buf += &c.to_string();
@@ -176,7 +176,7 @@ impl BitboardConsole for Bitboard {
         }
         buf += &format!("binaly: {}", format_with_underscores(self.player_bods[0]));
 
-        buf += "\nself.turn_player[1]";
+        buf += "\nself.turn_player[1]\n";
         buf += "  0 1 2 3 4\n";
         for c in 0..FIELD_BOD_HEIGHT {
             buf += &c.to_string();
