@@ -1,3 +1,5 @@
+mod bit_vidro;
+use crate::bit_vidro::BitVidro;
 use Vec;
 use lru::LruCache;
 use regex::Regex;
