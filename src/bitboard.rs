@@ -99,31 +99,31 @@ impl Bitboard {
     pub fn apply_force(&mut self, mv: &Move) {
         match mv {
             &Move::Place { r, c } => {
-                self.set_force(c, r);
+                self.set_force(r, c);
             }
             &Move::Flick { r, c, angle_idx } => {
-                self.flick_force(c, r, angle_idx);
+                self.flick_force(r, c, angle_idx);
             }
         }
     }
-    pub fn set_force(&mut self, c: u64, r: u64) {
-        self.player_bods[self.turn_player] |= 1u64 << (c * BITBOD_WIDTH + r);
-        self.piece_bod |= 1u64 << (c * BITBOD_WIDTH + r);
+    pub fn set_force(&mut self, r: u64, c: u64) {
+        self.player_bods[self.turn_player] |= 1u64 << (r * BITBOD_WIDTH + c);
+        self.piece_bod |= 1u64 << (r * BITBOD_WIDTH + c);
         self.have_piece[self.turn_player] -= 1;
         self.turn_change();
     }
-    pub fn flick_force(&mut self, c: u64, r: u64, angle_idx: usize) {
+    pub fn flick_force(&mut self, r: u64, c: u64, angle_idx: usize) {
         use std::arch::x86_64::{_pdep_u64, _pext_u64};
 
         let angle = ANGLE[angle_idx % 4];
         let is_positive_angle = angle_idx < 4;
         let mut line = ANGLE_LINE[angle_idx];
-        let target_bit = 1u64 << (BITBOD_WIDTH * c + r);
+        let target_bit = 1u64 << (BITBOD_WIDTH * r + c);
 
         if is_positive_angle {
             //左シフトで表す方向
             //駒の場所にlineの先端を移動する
-            line <<= BITBOD_WIDTH * c + r;
+            line <<= BITBOD_WIDTH * r + c;
             line &= FIELD_BOD; //5*5に収まるようにマスク
             let mut line_piece = self.piece_bod & line;
 
@@ -149,7 +149,7 @@ impl Bitboard {
         } else {
             //右シフトで表す方向
             //駒の場所にlineの先端を移動する
-            line >>= BITBOD_WIDTH * (4 - c) + (4 - r);
+            line >>= BITBOD_WIDTH * (4 - r) + (4 - c);
             line &= FIELD_BOD; //5*に収まるようにマスク
             let mut line_piece = self.piece_bod & line;
 
