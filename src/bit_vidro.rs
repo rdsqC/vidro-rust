@@ -164,4 +164,40 @@ impl BitVidro {
             }
         }
     }
+    pub fn to_string(&self) -> String {
+        const COLOR_RESET: &str = "\u{001b}[0m";
+        let mut buf = String::new();
+
+        buf += "\n--------------------";
+        buf += "\nnow turn player: ";
+        buf += &self.turn_player.to_string();
+        buf += "\n";
+
+        buf += "  0 1 2 3 4\n";
+        for c in 0..5 {
+            buf += &c.to_string();
+
+            for r in 0..5 {
+                buf += "\u{001b}[";
+                buf += &(31 + ((self.player_bods[0] >> (c * BITBOD_WIDTH + r)) & 0b1)).to_string();
+                buf += if (self.piece_bod >> (c * BITBOD_WIDTH + r)) & 0b1 == 0 {
+                    r"m  "
+                } else {
+                    r"m● "
+                };
+                buf += COLOR_RESET;
+            }
+            buf += "\n";
+        }
+
+        for i in 0..2 {
+            buf += "player";
+            buf += &i.to_string();
+            buf += ": ";
+            buf += &self.have_piece[i as usize].to_string();
+            buf += "\n";
+        }
+
+        return buf;
+    }
 }
