@@ -321,8 +321,8 @@ impl Bitboard {
         let blank: u64 = FIELD_BOD & !(self.player_bods[0] | self.player_bods[1]); //空白マス
         for angle_idx in 0..ANGLE.len() as u8 {
             let angle = ANGLE[angle_idx as usize];
-            let can_flick_bod1 = self.player_bods[turn_player] & (blank << angle);
-            let can_flick_bod2 = self.player_bods[turn_player] & (blank >> angle);
+            let can_flick_bod1 = self.player_bods[turn_player] & (blank >> angle);
+            let can_flick_bod2 = self.player_bods[turn_player] & (blank << angle);
             for r in 0..FIELD_BOD_HEIGHT as u8 {
                 for c in 0..FIELD_BOD_WIDTH as u8 {
                     let idx = r * BITBOD_WIDTH as u8 + c;
