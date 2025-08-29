@@ -318,6 +318,7 @@ impl Bitboard {
         }
 
         //flickの合法手を集める
+        let prev_angle = ANGLE[prev_move.angle_idx as usize % 4] as u8;
         let blank: u64 = FIELD_BOD & !(self.player_bods[0] | self.player_bods[1]); //空白マス
         for angle_idx in 0..ANGLE.len() as u8 {
             let angle = ANGLE[angle_idx as usize];
@@ -326,10 +327,21 @@ impl Bitboard {
             for r in 0..FIELD_BOD_HEIGHT as u8 {
                 for c in 0..FIELD_BOD_WIDTH as u8 {
                     let idx = r * BITBOD_WIDTH as u8 + c;
-                    if (can_flick_bod1 << idx) & 0b1 == 1 {
+
+                    let difference_of_idx = idx - prev_move.idx;
+                    let contain_repetition_of_moves = prev_move.angle_idx % 4 == angle_idx
+                        && difference_of_idx % prev_angle == 0
+                        && difference_of_idx / prev_angle <= 5;
+                    let contain_first = idx > prev_move.idx;
+
+                    if (can_flick_bod1 << idx) & 0b1 == 1
+                        && !(contain_repetition_of_moves && contain_first)
+                    {
                         result.push(MoveBit::new(r, c, angle_idx));
                     }
-                    if (can_flick_bod2 << idx) & 0b1 == 1 {
+                    if (can_flick_bod2 << idx) & 0b1 == 1
+                        && !(contain_repetition_of_moves && !contain_first)
+                    {
                         result.push(MoveBit::new(r, c, angle_idx + 4));
                     }
                 }

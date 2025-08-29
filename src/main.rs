@@ -1651,10 +1651,7 @@ fn main() {
         bit_vidro.print_data();
         let mv = Bitboard::read_to_move();
         bit_vidro.apply_force(mv);
-        if count > 3 {
-            bit_vidro.print_data();
-            bit_vidro.undo_force(mv);
-        }
+
         count += 1;
     }
 
