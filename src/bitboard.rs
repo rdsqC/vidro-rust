@@ -1,5 +1,4 @@
 use crate::bitboard_console::BitboardConsole;
-use std::str::FromStr;
 
 #[derive(Debug)]
 pub struct Bitboard {
@@ -16,8 +15,8 @@ pub struct MoveBit {
 
 impl MoveBit {
     pub fn to_string(&self) -> String {
-        let r = self.angle_idx / 5;
-        let c = self.angle_idx % 5;
+        let r = self.idx / BITBOD_WIDTH as u8;
+        let c = self.idx % BITBOD_WIDTH as u8;
         if self.angle_idx < 8 {
             //flick
             format!("F({},{},{})", r, c, self.angle_idx)
