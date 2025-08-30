@@ -296,7 +296,7 @@ impl Bitboard {
             "target_bit is protrude beyand piece_bod"
         );
     }
-    pub fn generate_legal_move(&self, prev_move: MoveBit) -> Vec<MoveBit> {
+    pub fn generate_legal_move(&self, prev_move: Option<MoveBit>) -> Vec<MoveBit> {
         let mut result = Vec::new();
         let turn_player = ((-self.turn + 1) / 2) as usize;
 
@@ -318,7 +318,12 @@ impl Bitboard {
         }
 
         //flickの合法手を集める
-        let prev_angle = ANGLE[prev_move.angle_idx as usize % 4] as u8;
+        let (prev, is_root) = if let Some(mv) = prev_move {
+            (mv, false)
+        } else {
+            (MoveBit::new(0, 0, 0), true)
+        };
+        let prev_angle = ANGLE[prev.angle_idx as usize % 4] as u8;
         let blank: u64 = FIELD_BOD & !(self.player_bods[0] | self.player_bods[1]); //空白マス
         for angle_idx in 0..ANGLE.len() as u8 {
             let angle = ANGLE[angle_idx as usize];
@@ -328,11 +333,15 @@ impl Bitboard {
                 for c in 0..FIELD_BOD_WIDTH as u8 {
                     let idx = r * BITBOD_WIDTH as u8 + c;
 
-                    let difference_of_idx = idx - prev_move.idx;
-                    let contain_repetition_of_moves = prev_move.angle_idx % 4 == angle_idx
-                        && difference_of_idx % prev_angle == 0
-                        && difference_of_idx / prev_angle <= 5;
-                    let contain_first = idx > prev_move.idx;
+                    let contain_repetition_of_moves = if is_root {
+                        let difference_of_idx = idx - prev.idx;
+                        prev.angle_idx % 4 == angle_idx
+                            && difference_of_idx % prev_angle == 0
+                            && difference_of_idx / prev_angle <= 5
+                    } else {
+                        false
+                    };
+                    let contain_first = idx > prev.idx;
 
                     if (can_flick_bod1 << idx) & 0b1 == 1
                         && !(contain_repetition_of_moves && contain_first)
