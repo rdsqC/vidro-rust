@@ -1646,12 +1646,13 @@ fn find_best_move(
 fn main() {
     let mut bit_vidro = Bitboard::new_initial();
     let mut count = 0;
+    let mut prev_move;
     loop {
         // println!("{}", bit_vidro.to_string());
         bit_vidro.print_data();
         let mv = Bitboard::read_to_move();
         bit_vidro.apply_force(mv);
-
+        bit_vidro.generate_legal_move(prev_move);
         count += 1;
     }
 
