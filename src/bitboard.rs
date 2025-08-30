@@ -363,12 +363,12 @@ impl Bitboard {
                     };
                     let contain_first = idx > prev.idx;
 
-                    if (can_flick_bod1 << idx) & 0b1 == 1
+                    if (can_flick_bod1 >> idx) & 0b1 == 1
                         && !(contain_repetition_of_moves && contain_first)
                     {
                         result.push(MoveBit::new(r, c, angle_idx));
                     }
-                    if (can_flick_bod2 << idx) & 0b1 == 1
+                    if (can_flick_bod2 >> idx) & 0b1 == 1
                         && !(contain_repetition_of_moves && !contain_first)
                     {
                         result.push(MoveBit::new(r, c, angle_idx + 4));
