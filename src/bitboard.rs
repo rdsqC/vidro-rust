@@ -333,7 +333,6 @@ impl Bitboard {
                 }
             }
         }
-
         //flickの合法手を集める
         let (prev, is_root) = if let Some(mv) = prev_move {
             (mv, false)
@@ -342,10 +341,14 @@ impl Bitboard {
         };
         let prev_angle = ANGLE[prev.angle_idx as usize % 4] as u8;
         let blank: u64 = FIELD_BOD & !(self.player_bods[0] | self.player_bods[1]); //空白マス
+        // Self::print_u64("blank", blank);
         for angle_idx in 0..ANGLE.len() as u8 {
             let angle = ANGLE[angle_idx as usize];
             let can_flick_bod1 = self.player_bods[turn_player] & (blank >> angle);
             let can_flick_bod2 = self.player_bods[turn_player] & (blank << angle);
+
+            // Self::print_u64("can_flick_bod1", can_flick_bod1);
+            // Self::print_u64("can_flick_bod2", can_flick_bod2);
             for r in 0..FIELD_BOD_HEIGHT as u8 {
                 for c in 0..FIELD_BOD_WIDTH as u8 {
                     let idx = r * BITBOD_WIDTH as u8 + c;
