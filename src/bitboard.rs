@@ -311,19 +311,25 @@ impl Bitboard {
         let mut result = Vec::new();
         let turn_player = ((-self.turn + 1) / 2) as usize;
 
-        //setの合法手を集める
-        let mut can_set_bod = !self.player_bods[turn_player];
-        for angle in ANGLE {
-            can_set_bod &= can_set_bod << angle;
-            can_set_bod &= can_set_bod >> angle;
-        }
-        can_set_bod &= !self.player_bods[1 - turn_player];
-        can_set_bod &= FIELD_BOD;
-        for r in 0..FIELD_BOD_HEIGHT as u8 {
-            for c in 0..FIELD_BOD_WIDTH as u8 {
-                let idx = r * BITBOD_WIDTH as u8 + c;
-                if (can_set_bod << idx) & 0b1 == 1 {
-                    result.push(MoveBit::new(r, c, 8));
+        if self.have_piece[turn_player] > 0 {
+            //setの合法手を集める
+            let mut can_set_bod = self.player_bods[turn_player];
+            let can_set_bod_copy = self.player_bods[turn_player];
+            // Self::print_u64("can_set_bod1", can_set_bod);
+            for angle in ANGLE {
+                can_set_bod |= can_set_bod_copy << angle;
+                can_set_bod |= can_set_bod_copy >> angle;
+            }
+            can_set_bod = !can_set_bod; //反転して欲しいものにする
+            can_set_bod &= !self.player_bods[1 - turn_player];
+            can_set_bod &= FIELD_BOD;
+            // Self::print_u64("can_set_bod2", can_set_bod);
+            for r in 0..FIELD_BOD_HEIGHT as u8 {
+                for c in 0..FIELD_BOD_WIDTH as u8 {
+                    let idx = r * BITBOD_WIDTH as u8 + c;
+                    if (can_set_bod >> idx) & 0b1 == 1 {
+                        result.push(MoveBit::new(r, c, 8));
+                    }
                 }
             }
         }
