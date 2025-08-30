@@ -4,6 +4,8 @@ use Vec;
 use bitboard::Bitboard;
 use bitboard_console::BitboardConsole;
 use lru::LruCache;
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 use regex::Regex;
 use std::fs::{File, OpenOptions, metadata};
 use std::io::Write;
@@ -572,6 +574,8 @@ fn generate_win_masks() -> Vec<u32> {
 }
 
 use lazy_static::lazy_static;
+
+use crate::bitboard::MoveBit;
 lazy_static! {
     static ref WIN_MASKS: Vec<u32> = generate_win_masks();
 }
@@ -1646,14 +1650,18 @@ fn find_best_move(
 fn main() {
     let mut bit_vidro = Bitboard::new_initial();
     let mut count = 0;
-    let mut prev_move;
+    let mut prev_move = None;
     loop {
         // println!("{}", bit_vidro.to_string());
         bit_vidro.print_data();
+        let legal_move = bit_vidro.generate_legal_move(prev_move);
+        MoveBit::print_vec_to_string(&legal_move);
+        let mut rng = thread_rng();
         let mv = Bitboard::read_to_move();
+        println!("決定手: {}", mv.to_string());
         bit_vidro.apply_force(mv);
-        bit_vidro.generate_legal_move(prev_move);
         count += 1;
+        prev_move = Some(mv);
     }
 
     // _play_vidro();
