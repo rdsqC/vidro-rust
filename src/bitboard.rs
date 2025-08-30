@@ -24,6 +24,18 @@ impl MoveBit {
             format!("S({},{})", r, c)
         }
     }
+    pub fn vec_to_string(moves: &Vec<MoveBit>) -> String {
+        let mut result = String::new();
+        for &mv in moves {
+            result += &mv.to_string();
+            result += ", ";
+        }
+        result
+    }
+    pub fn print_vec_to_string(moves: &Vec<MoveBit>) {
+        let text = Self::vec_to_string(moves);
+        println!("legal_moves: {}\nlen: {}", text, moves.len());
+    }
     pub fn new(r: u8, c: u8, idx: u8) -> MoveBit {
         MoveBit {
             idx: r * BITBOD_WIDTH as u8 + c,
