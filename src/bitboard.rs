@@ -481,4 +481,144 @@ impl Bitboard {
 
         result
     }
+    pub fn generate_reach_bod(&self, player: usize) -> u64 {
+        let turn_player_bod = self.player_bods[player];
+        let mut result = 0u64;
+
+        for angle in ANGLE {
+            result |= (turn_player_bod << angle) & (turn_player_bod >> angle); //o_o を検知
+            let oo = (turn_player_bod >> angle) & (turn_player_bod >> angle * 2);
+            result |= oo; //_oo を検知
+            result |= oo.wrapping_shl(angle as u32 * 2); //oo_ を検知
+        }
+        result &= FIELD_BOD;
+        result
+    }
+    pub fn generate_threat_bod(&self, player: usize) -> u64 {
+        let reach_bod = self.generate_reach_bod(player);
+        let mut result = reach_bod;
+        let piece_bod = self.player_bods[0] | self.player_bods[1];
+        for angle in ANGLE {
+            let mut mut_reach_bod = reach_bod;
+            for _ in 1..5 {
+                mut_reach_bod >>= angle;
+                mut_reach_bod &= !piece_bod;
+                result |= mut_reach_bod;
+            }
+            let mut mut_reach_bod = reach_bod;
+            for _ in 1..5 {
+                mut_reach_bod = mut_reach_bod.wrapping_shl(angle as u32);
+                mut_reach_bod &= !piece_bod;
+                result |= mut_reach_bod;
+            }
+        }
+        result &= FIELD_BOD;
+        result
+    }
+    pub fn generate_threat_moves(&self, prev_move: Option<MoveBit>) -> Vec<MoveBit> {
+        let mut result = Vec::new();
+        let turn_player = ((-self.turn + 1) / 2) as usize;
+        let threat_bod = self.generate_threat_bod(turn_player);
+
+        if self.have_piece[turn_player] > 0 {
+            //setの合法手を集める
+            let mut can_set_bod = self.player_bods[turn_player];
+            let can_set_bod_copy = self.player_bods[turn_player];
+            for angle in ANGLE {
+                can_set_bod |= can_set_bod_copy << angle;
+                can_set_bod |= can_set_bod_copy >> angle;
+            }
+            can_set_bod = !can_set_bod; //反転して欲しいものにする
+            can_set_bod &= !self.player_bods[1 - turn_player];
+            can_set_bod &= FIELD_BOD;
+
+            can_set_bod &= threat_bod; //脅威のみ
+
+            while can_set_bod != 0 {
+                let idx = can_set_bod.trailing_zeros();
+                result.push(MoveBit::from_idx(idx as u8, 8));
+                can_set_bod &= can_set_bod - 1;
+            }
+        }
+        //flickの合法手を集める
+        let (prev, is_root) = if let Some(mv) = prev_move {
+            (mv, false)
+        } else {
+            (MoveBit::new(0, 0, 0), true)
+        };
+        let prev_angle = ANGLE[prev.angle_idx as usize % 4] as u8;
+        let blank: u64 = FIELD_BOD & !(self.player_bods[0] | self.player_bods[1]); //空白マス
+        let is_prev_left_direction = prev.angle_idx < 4;
+        for angle_idx in 0..ANGLE.len() as u8 {
+            let angle = ANGLE[angle_idx as usize];
+
+            //以下2つのthreat_flick_bod(_)変数はFIELD_BODをはみ出る可能性がある
+            let threat_flick_bod1 = {
+                //左シフトangle方向すぐに壁マスがある脅威マスのbod
+                let mut angle_with_wall_bod = threat_bod & !(blank >> angle);
+                let mut result = 0u64;
+                //生脅威マスにはcan_flick_bod(_)はないため1からシフトをする感覚
+                for _ in 1..5 {
+                    angle_with_wall_bod <<= angle;
+                    result |= angle_with_wall_bod; //駒をmaskするためのbodなためめり込ませる
+                    angle_with_wall_bod &= blank;
+                }
+                result
+            };
+            let threat_flick_bod2 = {
+                //右シフトangle方向すぐに壁マスがある脅威マスのbod
+                let mut angle_with_wall_bod = threat_bod & !(blank << angle);
+                let mut result = 0u64;
+                //生脅威マスにはcan_flick_bod(_)はないため1からシフトをする感覚
+                for _ in 1..5 {
+                    angle_with_wall_bod >>= angle;
+                    result |= angle_with_wall_bod; //駒をmaskするためのbodなためめり込ませる
+                    angle_with_wall_bod &= blank;
+                }
+                result
+            };
+
+            let can_flick_bod1 = self.player_bods[turn_player] & (blank >> angle);
+            let can_flick_bod2 = self.player_bods[turn_player] & (blank << angle);
+
+            let mut can_threat_flick_bod1 = can_flick_bod1 & threat_flick_bod1;
+            let mut can_threat_flick_bod2 = can_flick_bod2 & threat_flick_bod2;
+
+            while can_threat_flick_bod1 != 0 {
+                let idx = can_threat_flick_bod1.trailing_zeros() as u8;
+
+                let is_repetition_of_moves = {
+                    let difference_of_idx = idx.abs_diff(prev.idx);
+                    !is_prev_left_direction
+                        && prev.angle_idx % 4 == angle_idx
+                        && difference_of_idx % prev_angle == 0
+                        && difference_of_idx / prev_angle <= 5
+                        && !is_root
+                };
+                if !is_repetition_of_moves {
+                    result.push(MoveBit::from_idx(idx, angle_idx));
+                }
+                can_threat_flick_bod1 &= can_threat_flick_bod1 - 1;
+            }
+
+            while can_threat_flick_bod2 != 0 {
+                let idx = can_threat_flick_bod2.trailing_zeros() as u8;
+
+                let is_repetition_of_moves = {
+                    let difference_of_idx = idx.abs_diff(prev.idx);
+                    is_prev_left_direction
+                        && prev.angle_idx % 4 == angle_idx
+                        && difference_of_idx % prev_angle == 0
+                        && difference_of_idx / prev_angle <= 5
+                        && !is_root
+                };
+                if !is_repetition_of_moves {
+                    result.push(MoveBit::from_idx(idx, angle_idx + 4));
+                }
+                can_threat_flick_bod2 &= can_threat_flick_bod2 - 1;
+            }
+        }
+
+        result
+    }
 }
