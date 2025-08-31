@@ -1,4 +1,5 @@
 use crate::bitboard_console::BitboardConsole;
+use crate::eval_value::{Eval, EvalValue};
 
 #[derive(Debug)]
 pub struct Bitboard {
@@ -249,6 +250,103 @@ impl Bitboard {
             "player_bods[1] is protrude beyond FIELD_BOD"
         );
     }
+    pub fn game_over(&self) -> bool {
+        for p in 0..2 {
+            let b = self.player_bods[p];
+
+            //一列が7になっていることに注意する
+            //横
+            if (b & (b >> ANGLE[0]) & (b >> ANGLE[0] * 2)) != 0 {
+                return true;
+            }
+
+            //縦
+            if (b & (b >> ANGLE[2]) & (b >> ANGLE[2] * 2)) != 0 {
+                return true;
+            }
+
+            //右下斜め
+            if (b & (b >> ANGLE[1]) & (b >> ANGLE[1] * 2)) != 0 {
+                return true;
+            }
+
+            //左下斜め
+            if (b & (b >> ANGLE[3]) & (b >> ANGLE[3] * 2)) != 0 {
+                return true;
+            }
+        }
+        false
+    }
+    pub fn win_turn(&self) -> i16 {
+        let mut result = [0i16; 2];
+        for p in 0..2 {
+            let b = self.player_bods[p];
+
+            //一列が7になっていることに注意する
+            //横
+            if (b & (b >> ANGLE[0]) & (b >> ANGLE[0] * 2)) != 0 {
+                result[p] = 1;
+            }
+
+            //縦
+            if (b & (b >> ANGLE[2]) & (b >> ANGLE[2] * 2)) != 0 {
+                result[p] = 1;
+            }
+
+            //右下斜め
+            if (b & (b >> ANGLE[1]) & (b >> ANGLE[1] * 2)) != 0 {
+                result[p] = 1;
+            }
+
+            //左下斜め
+            if (b & (b >> ANGLE[3]) & (b >> ANGLE[3] * 2)) != 0 {
+                result[p] = 1;
+            }
+        }
+
+        result[0] - result[1]
+    }
+    pub fn win_eval(&self) -> Eval {
+        let mut result = [0i16; 2];
+        for p in 0..2 {
+            let b = self.player_bods[p];
+
+            //一列が7になっていることに注意する
+            //横
+            if (b & (b >> ANGLE[0]) & (b >> ANGLE[0] * 2)) != 0 {
+                result[p] = 1;
+            }
+
+            //縦
+            if (b & (b >> ANGLE[2]) & (b >> ANGLE[2] * 2)) != 0 {
+                result[p] = 1;
+            }
+
+            //右下斜め
+            if (b & (b >> ANGLE[1]) & (b >> ANGLE[1] * 2)) != 0 {
+                result[p] = 1;
+            }
+
+            //左下斜め
+            if (b & (b >> ANGLE[3]) & (b >> ANGLE[3] * 2)) != 0 {
+                result[p] = 1;
+            }
+        }
+
+        let eval = result[0] - result[1];
+        let evaluated = result[0] + result[1] > 0;
+        let value = if evaluated {
+            if eval == 0 {
+                EvalValue::Draw
+            } else {
+                EvalValue::Win(eval)
+            }
+        } else {
+            EvalValue::Unknown
+        };
+        Eval { value, evaluated }
+    }
+
     pub fn flick_undo_force(&mut self, mv: MoveBit) {
         self.turn_change();
         use std::arch::x86_64::{_pdep_u64, _pext_u64};
