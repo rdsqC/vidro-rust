@@ -37,10 +37,13 @@ impl MoveBit {
         println!("legal_moves: {}\nlen: {}", text, moves.len());
     }
     pub fn new(r: u8, c: u8, idx: u8) -> MoveBit {
-        MoveBit {
+        Self {
             idx: r * BITBOD_WIDTH as u8 + c,
             angle_idx: idx,
         }
+    }
+    pub fn from_idx(idx: u8, angle_idx: u8) -> Self {
+        Self { idx, angle_idx }
     }
 }
 
@@ -315,7 +318,6 @@ impl Bitboard {
             //setの合法手を集める
             let mut can_set_bod = self.player_bods[turn_player];
             let can_set_bod_copy = self.player_bods[turn_player];
-            // Self::print_u64("can_set_bod1", can_set_bod);
             for angle in ANGLE {
                 can_set_bod |= can_set_bod_copy << angle;
                 can_set_bod |= can_set_bod_copy >> angle;
@@ -323,14 +325,11 @@ impl Bitboard {
             can_set_bod = !can_set_bod; //反転して欲しいものにする
             can_set_bod &= !self.player_bods[1 - turn_player];
             can_set_bod &= FIELD_BOD;
-            // Self::print_u64("can_set_bod2", can_set_bod);
-            for r in 0..FIELD_BOD_HEIGHT as u8 {
-                for c in 0..FIELD_BOD_WIDTH as u8 {
-                    let idx = r * BITBOD_WIDTH as u8 + c;
-                    if (can_set_bod >> idx) & 0b1 == 1 {
-                        result.push(MoveBit::new(r, c, 8));
-                    }
-                }
+
+            while can_set_bod != 0 {
+                let idx = can_set_bod.trailing_zeros();
+                result.push(MoveBit::from_idx(idx as u8, 8));
+                can_set_bod &= can_set_bod - 1;
             }
         }
         //flickの合法手を集める
@@ -341,44 +340,44 @@ impl Bitboard {
         };
         let prev_angle = ANGLE[prev.angle_idx as usize % 4] as u8;
         let blank: u64 = FIELD_BOD & !(self.player_bods[0] | self.player_bods[1]); //空白マス
-        // Self::print_u64("blank", blank);
+        let is_prev_left_direction = prev.angle_idx < 4;
         for angle_idx in 0..ANGLE.len() as u8 {
             let angle = ANGLE[angle_idx as usize];
-            let can_flick_bod1 = self.player_bods[turn_player] & (blank >> angle);
-            let can_flick_bod2 = self.player_bods[turn_player] & (blank << angle);
+            let mut can_flick_bod1 = self.player_bods[turn_player] & (blank >> angle);
+            let mut can_flick_bod2 = self.player_bods[turn_player] & (blank << angle);
 
-            // Self::print_u64("can_flick_bod1", can_flick_bod1);
-            // Self::print_u64("can_flick_bod2", can_flick_bod2);
-            for r in 0..FIELD_BOD_HEIGHT as u8 {
-                for c in 0..FIELD_BOD_WIDTH as u8 {
-                    let idx = r * BITBOD_WIDTH as u8 + c;
+            while can_flick_bod1 != 0 {
+                let idx = can_flick_bod1.trailing_zeros() as u8;
 
-                    let contain_repetition_of_moves = if is_root {
-                        false
-                    } else {
-                        let difference_of_idx = idx.abs_diff(prev.idx);
-                        prev.angle_idx % 4 == angle_idx
-                            && difference_of_idx % prev_angle == 0
-                            && difference_of_idx / prev_angle <= 5
-                    };
-                    let contain_first = idx > prev.idx;
-
-                    // println!(
-                    //     "contain_repetition_of_moves: {}",
-                    //     contain_repetition_of_moves
-                    // );
-
-                    if (can_flick_bod1 >> idx) & 0b1 == 1
-                        && !(contain_repetition_of_moves && contain_first)
-                    {
-                        result.push(MoveBit::new(r, c, angle_idx));
-                    }
-                    if (can_flick_bod2 >> idx) & 0b1 == 1
-                        && !(contain_repetition_of_moves && !contain_first)
-                    {
-                        result.push(MoveBit::new(r, c, angle_idx + 4));
-                    }
+                let is_repetition_of_moves = {
+                    let difference_of_idx = idx.abs_diff(prev.idx);
+                    !is_prev_left_direction
+                        && prev.angle_idx % 4 == angle_idx
+                        && difference_of_idx % prev_angle == 0
+                        && difference_of_idx / prev_angle <= 5
+                        && !is_root
+                };
+                if !is_repetition_of_moves {
+                    result.push(MoveBit::from_idx(idx, angle_idx));
                 }
+                can_flick_bod1 &= can_flick_bod1 - 1;
+            }
+
+            while can_flick_bod2 != 0 {
+                let idx = can_flick_bod2.trailing_zeros() as u8;
+
+                let is_repetition_of_moves = {
+                    let difference_of_idx = idx.abs_diff(prev.idx);
+                    is_prev_left_direction
+                        && prev.angle_idx % 4 == angle_idx
+                        && difference_of_idx % prev_angle == 0
+                        && difference_of_idx / prev_angle <= 5
+                        && !is_root
+                };
+                if !is_repetition_of_moves {
+                    result.push(MoveBit::from_idx(idx, angle_idx + 4));
+                }
+                can_flick_bod2 &= can_flick_bod2 - 1;
             }
         }
 
