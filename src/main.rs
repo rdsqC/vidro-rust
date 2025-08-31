@@ -1636,22 +1636,39 @@ fn find_best_move(
     search_thread.join().unwrap()
 }
 
+fn eval_mon(bit_vidro: &mut Bitboard) -> i16 {
+    const N: usize = 10000;
+    const MAX_EVAL: i16 = 1000;
+    let mut eval = 0;
+    for _ in 0..N {
+        let mut moves = Vec::new();
+        let mut prev_move = None;
+        while !bit_vidro.game_over() {
+            // println!("{}", bit_vidro.to_string());
+            // bit_vidro.print_data();
+            let legal_move = bit_vidro.generate_legal_move(prev_move);
+            // MoveBit::print_vec_to_string(&legal_move);
+            let mut rng = thread_rng();
+            // let mv = Bitboard::read_to_move();
+            let mv = legal_move.choose(&mut rng).unwrap();
+            // println!("決定手: {}", mv.to_string());
+            bit_vidro.apply_force(*mv);
+            moves.push(*mv);
+            prev_move = Some(*mv);
+        }
+        eval += bit_vidro.win_turn();
+        for _ in 0..moves.len() {
+            bit_vidro.undo_force(moves.pop().unwrap());
+        }
+    }
+    // eval * MAX_EVAL / N as i16
+    eval
+}
+
 fn main() {
     let mut bit_vidro = Bitboard::new_initial();
-    let mut count = 0;
-    let mut prev_move = None;
-    loop {
-        // println!("{}", bit_vidro.to_string());
-        bit_vidro.print_data();
-        let legal_move = bit_vidro.generate_legal_move(prev_move);
-        MoveBit::print_vec_to_string(&legal_move);
-        let mut rng = thread_rng();
-        let mv = Bitboard::read_to_move();
-        println!("決定手: {}", mv.to_string());
-        bit_vidro.apply_force(mv);
-        count += 1;
-        prev_move = Some(mv);
-    }
+    println!("result: {}", eval_mon(&mut bit_vidro));
+    return;
 
     // _play_vidro();
     // return;
