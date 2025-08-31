@@ -354,14 +354,19 @@ impl Bitboard {
                     let idx = r * BITBOD_WIDTH as u8 + c;
 
                     let contain_repetition_of_moves = if is_root {
-                        let difference_of_idx = idx - prev.idx;
+                        false
+                    } else {
+                        let difference_of_idx = idx.abs_diff(prev.idx);
                         prev.angle_idx % 4 == angle_idx
                             && difference_of_idx % prev_angle == 0
                             && difference_of_idx / prev_angle <= 5
-                    } else {
-                        false
                     };
                     let contain_first = idx > prev.idx;
+
+                    // println!(
+                    //     "contain_repetition_of_moves: {}",
+                    //     contain_repetition_of_moves
+                    // );
 
                     if (can_flick_bod1 >> idx) & 0b1 == 1
                         && !(contain_repetition_of_moves && contain_first)
