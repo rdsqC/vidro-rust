@@ -1,8 +1,10 @@
 mod bitboard;
 mod bitboard_console;
+mod eval_value;
 use Vec;
 use bitboard::Bitboard;
 use bitboard_console::BitboardConsole;
+use eval_value::{Eval, EvalValue};
 use lru::LruCache;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
@@ -782,7 +784,7 @@ fn win_eval_bit_shift(vidro: &Vidro) -> Eval {
         }
     }
 
-    let eval: i8 = if result[0] { 1 } else { 0 } + if result[1] { -1 } else { 0 };
+    let eval: i16 = if result[0] { 1 } else { 0 } + if result[1] { -1 } else { 0 };
     let evaluated = result[0] || result[1];
     let value = if evaluated {
         if eval == 0 {
@@ -830,7 +832,7 @@ fn win_eval(vidro: &Vidro) -> Eval {
         }
     }
 
-    let eval: i8 = if result[0] { 1 } else { 0 } + if result[1] { -1 } else { 0 };
+    let eval: i16 = if result[0] { 1 } else { 0 } + if result[1] { -1 } else { 0 };
     let evaluted = result[0] || result[1];
     let value = if evaluted {
         if eval == 0 {
@@ -918,19 +920,6 @@ const fn apply_transfrom(board_data: &[u8; 25], t: u8) -> [u8; 25] {
     result
 }
 
-#[derive(Clone, Debug)]
-enum EvalValue {
-    Win(i8),
-    Draw,    //探索的千日手などの引き合分け
-    Unknown, //深さ不足で未確定
-}
-
-#[derive(Clone, Debug)]
-struct Eval {
-    value: EvalValue,
-    evaluated: bool, //評価済みかどうか
-}
-
 fn evaluate_reach(vidro: &mut Vidro) -> i16 {
     vidro.next_turn(); //意図的に手番を書き換え2手差しさせたときに勝利することがあるかを調べる
     let moves = create_legal_moves_only_flick(vidro);
@@ -938,7 +927,7 @@ fn evaluate_reach(vidro: &mut Vidro) -> i16 {
     for mv in &moves {
         vidro.apply_move_force(mv);
         if let EvalValue::Win(value) = win_eval_bit_shift(vidro).value {
-            if value == turn {
+            if value as i8 == turn {
                 vidro.undo_move(mv).unwrap();
                 vidro.next_turn();
                 return value as i16
@@ -958,7 +947,7 @@ fn find_mate_in_one_move(vidro: &mut Vidro) -> Option<Move> {
     for mv in &moves {
         vidro.apply_move_force(mv);
         if let EvalValue::Win(value) = win_eval_bit_shift(vidro).value {
-            if value == turn {
+            if value as i8 == turn {
                 vidro.undo_move(mv).unwrap();
                 return Some(*mv);
             }
@@ -1163,7 +1152,7 @@ fn find_mate_recursive(vidro: &mut Vidro, depth: usize, mate_move: &mut Move) ->
 fn check_opponent_defense(vidro: &mut Vidro, depth: usize, mate_move: &mut Move) -> bool {
     //勝になっていないかを確認
     if let EvalValue::Win(v) = win_eval_bit_shift(vidro).value {
-        if v == -vidro.turn {
+        if v as i8 == -vidro.turn {
             return true;
         }
     }
@@ -1211,7 +1200,7 @@ fn checkmate_in_one_move(vidro: &mut Vidro) -> bool {
     for mv in &moves {
         vidro.apply_move_force(mv);
         if let EvalValue::Win(value) = win_eval_bit_shift(vidro).value {
-            if value == turn {
+            if value as i8 == turn {
                 vidro.undo_move(mv).unwrap();
                 return true;
             }
