@@ -676,6 +676,7 @@ impl Bitboard {
             result |= _pext_u64(self.player_bods[1], FIELD_BOD) << 1;
             result |= turn_player as u64;
         }
+        // println!("{:0>64b}", result);
         result
     }
 }

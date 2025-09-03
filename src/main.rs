@@ -327,7 +327,7 @@ fn find_mate_sequence_recursive(
 
     if is_attacker {
         //見つかったときのdepthが大きい物(短く詰ませる)手を探す
-        let attacking_moves = vidro.generate_maybe_threat_moves(prev_move);
+        let attacking_moves = vidro.generate_legal_move(prev_move);
         if attacking_moves.is_empty() {
             return None;
         }
@@ -533,7 +533,7 @@ fn generate_threat_moves(vidro: &mut Bitboard, prev_move: Option<MoveBit>) -> Ve
 }
 
 fn evaluate_for_negamax(board: &mut Bitboard, prev_move: Option<MoveBit>) -> i16 {
-    eval_mon(board, prev_move);
+    // eval_mon(board, prev_move)
     static_evaluation(board, prev_move) * board.turn as i16
 }
 
@@ -561,7 +561,7 @@ struct TTEntry {
     best_move: MoveBit, // その局面で見つかった最善手
 }
 
-const USE_CACHE: bool = true;
+const USE_CACHE: bool = false;
 const USE_CACHE_DEPTH: usize = 8;
 
 const DRAW_SCORE: i16 = 0;
@@ -594,8 +594,12 @@ fn alphabeta(
     let terminal_eval = board.win_eval();
     if terminal_eval.evaluated {
         route.pop();
-        let score = if let EvalValue::Win(v) = terminal_eval.value {
-            v as i16 * WIN_LOSE_SCORE
+        let score = if let EvalValue::Win(winner) = terminal_eval.value {
+            if winner as i8 == board.turn {
+                WIN_LOSE_SCORE
+            } else {
+                -WIN_LOSE_SCORE
+            }
         } else {
             DRAW_SCORE
         };
@@ -630,13 +634,12 @@ fn alphabeta(
         //ファイル出力
         // writeln!(log_file.lock().unwrap(), "{}", log_line).expect("ログを書き込めませんでした");
 
-        if threat_moves_count > 5 {
-            let tsumi_result = find_mate_sequence(board, 7, prev_move);
-            if let Some(mate_sequence) = tsumi_result {
-                // 詰みを発見！スコアを「勝ち」に格上げし、手順も返す
-                let mate_score = WIN_LOSE_SCORE - mate_sequence.len() as i16;
-                return (mate_score, mate_sequence);
-            }
+        let tsumi_result = find_mate_sequence(board, 1, prev_move);
+        if let Some(mate_sequence) = tsumi_result {
+            // board.print_data();
+            // 詰みを発見！スコアを「勝ち」に格上げし、手順も返す
+            let mate_score = WIN_LOSE_SCORE - mate_sequence.len() as i16;
+            return (mate_score, mate_sequence);
         }
         return (static_score, best_pv);
     }
@@ -896,7 +899,7 @@ fn eval_mon(bit_vidro: &mut Bitboard, prev_move: Option<MoveBit>) -> i16 {
         }
     }
     // eval * MAX_EVAL / N as i16
-    eval
+    eval * 10
 }
 
 fn main() {
@@ -968,7 +971,7 @@ fn main() {
         let mut move_count = 0;
         let mut prev_move = None;
         const MAX_MOVES: usize = 100;
-        const RANDOM_MOVES_UNTIL: usize = 6;
+        const RANDOM_MOVES_UNTIL: usize = 0;
 
         loop {
             println!("\n--------------------------------");
@@ -994,7 +997,7 @@ fn main() {
                 break;
             }
 
-            let best_move: MoveBit;
+            let mut best_move: MoveBit;
             if move_count < RANDOM_MOVES_UNTIL {
                 println!("----ランダムループを選択----");
                 let legal_moves = vidro.generate_legal_move(prev_move);
@@ -1004,24 +1007,35 @@ fn main() {
                 use rand::seq::SliceRandom;
                 best_move = (*legal_moves.choose(&mut rand::thread_rng()).unwrap()).clone();
             } else {
-                println!("思考中...");
-                let search_depth = 5;
+                // let is_turn_humen = vidro.turn == 1;
+                let is_turn_humen = false;
+                if is_turn_humen {
+                    println!("手を選択");
+                    let legal_moves = vidro.generate_legal_move(prev_move);
+                    while {
+                        best_move = Bitboard::read_to_move();
+                        !legal_moves.contains(&best_move)
+                    } {}
+                } else {
+                    println!("思考中...");
+                    let search_depth = 7;
 
-                let log_file_for_thread = Arc::clone(&log_file);
-                let tt_for_thread = Arc::clone(&tt);
-                best_move = match find_best_move(
-                    &mut vidro,
-                    search_depth,
-                    tt_for_thread,
-                    log_file_for_thread,
-                    prev_move,
-                ) {
-                    Some(mv) => mv,
-                    None => {
-                        println!("指せる手がありません。手番プレイヤーの負けです");
-                        break;
-                    }
-                };
+                    let log_file_for_thread = Arc::clone(&log_file);
+                    let tt_for_thread = Arc::clone(&tt);
+                    best_move = match find_best_move(
+                        &mut vidro,
+                        search_depth,
+                        tt_for_thread,
+                        log_file_for_thread,
+                        prev_move,
+                    ) {
+                        Some(mv) => mv,
+                        None => {
+                            println!("指せる手がありません。手番プレイヤーの負けです");
+                            break;
+                        }
+                    };
+                }
             }
             println!("\n決定手: {}", best_move.to_string());
             vidro.apply_force(best_move);
