@@ -2,7 +2,7 @@ mod bitboard;
 mod bitboard_console;
 mod eval_value;
 use Vec;
-use bitboard::Bitboard;
+use bitboard::{Bitboard, FIELD_BOD, FIELD_BOD_HEIGHT, FIELD_BOD_WIDTH, MoveBit};
 use bitboard_console::BitboardConsole;
 use eval_value::{Eval, EvalValue};
 use lru::LruCache;
@@ -12,641 +12,46 @@ use regex::Regex;
 use std::fs::{File, OpenOptions, metadata};
 use std::io::Write;
 use std::num::NonZeroUsize;
+use std::os::unix::raw::pid_t;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use std::{io, usize};
 
-#[derive(PartialEq, Eq, Clone, Copy, Debug)]
-pub enum Move {
-    Place { r: u64, c: u64 },
-    Flick { r: u64, c: u64, angle_idx: usize },
-}
-
-impl Move {
-    pub fn to_string(&self) -> String {
-        match self {
-            Move::Place { r, c } => format!("S({},{})", r, c),
-            Move::Flick { r, c, angle_idx } => format!("F({},{},{})", r, c, angle_idx),
-        }
-    }
-}
-
-const ANGLES: [(i64, i64); 8] = [
-    (0, 1),
-    (-1, 1),
-    (-1, 0),
-    (-1, -1),
-    (0, -1),
-    (1, -1),
-    (1, 0),
-    (1, 1),
-];
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct Snapshot {
-    // turn_player: u8,
-    steps: usize,
-    players_has_piece: [u8; 2],
-    board_data: [u8; 25],
-    turn: i8,
-}
-
-#[derive(PartialEq, Eq, Clone)]
-pub struct Vidro {
-    // turn_player: u8,
-    steps: usize,
-    num_player: u8,
-    players_has_piece: [u8; 2],
-    board_data: [u8; 25],
-    board_histroy: Vec<Snapshot>,
-    prev_board: [u8; 25],
-    turn: i8,
-}
-
-impl Vidro {
-    pub fn new(board: u64) -> Vidro {
-        let mut players_has_piece = [5; 2];
-        let mut scan_board = board;
-        let mut board_data = [0u8; 25];
-        for idx in 0..25usize {
-            scan_board >>= 2;
-            let cell = scan_board & 0b11;
-            board_data[idx] = cell as u8;
-            match cell {
-                0b01 => players_has_piece[0] -= 1,
-                0b10 => players_has_piece[1] -= 1,
-                _ => (),
-            }
-        }
-
-        Vidro {
-            turn: -(board as i8 & 0b11) * 2 + 1,
-            board_data,
-            steps: board as usize % 2,
-            num_player: 2, //強制的2人プレイ
-            players_has_piece: players_has_piece,
-            board_histroy: Vec::new(),
-            prev_board: [0; 25],
-        }
-    }
-    pub fn get_hash_trout(hash: u64, v1: usize, v2: usize) -> u64 {
-        let result = hash;
-        result >> 2 >> 2 * (24 - (5 * v1 + v2)) & 0b11
-    }
-    pub fn get_hash_trout_index(hash: u64, index: usize) -> u64 {
-        let result = hash;
-        result >> 2 >> 2 * (24 - index)
-    }
-    pub fn set_hash_turn(hash: u64, turn_player: u8) -> u64 {
-        let mut result = hash;
-        result &= !0b11;
-        result |= turn_player as u64 & 0b11;
-        result
-    }
-    fn next_turn(&mut self) {
-        self.turn = -self.turn;
-    }
-    fn is_there_surrounding_piece(&self, ohajiki_num: u8, coord: (u64, u64)) -> bool {
-        for i in 0..3 {
-            for j in 0..3 {
-                if coord.0 as isize + i - 1 < 0
-                    || 5 as isize <= coord.0 as isize + i - 1
-                    || coord.1 as isize + j - 1 < 0
-                    || 5 as isize <= coord.1 as isize + j - 1
-                {
-                    continue;
-                }
-                if self.board_data[5 * ((coord.0 as isize + i) as usize - 1)
-                    + (coord.1 as isize + j) as usize
-                    - 1]
-                    == ohajiki_num
-                {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-    fn set_ohajiki_force(&mut self, coord: (u64, u64)) {
-        let now_turn_player = ((-self.turn + 1) / 2) as usize;
-        let ohajiki_num = (now_turn_player + 1).try_into().unwrap();
-        self.prev_board = self.board_data;
-
-        //スナップショット保存
-        self.board_histroy.push(Snapshot {
-            steps: self.steps,
-            players_has_piece: self.players_has_piece,
-            board_data: self.board_data,
-            turn: self.turn,
-        });
-
-        //変更
-        self.board_data[(coord.0 * 5 + coord.1) as usize] = ohajiki_num;
-        self.players_has_piece[now_turn_player] -= 1;
-        self.next_turn();
-        self.steps += 1;
-    }
-    fn set_ohajiki(&mut self, coord: (u64, u64)) -> Result<(), &'static str> {
-        //プレイヤーについている数字+1をそのプレイヤーの石として設計している。
-        let now_turn_player = ((-self.turn + 1) / 2) as usize;
-        let ohajiki_num = (now_turn_player + 1).try_into().unwrap();
-
-        if self.board_data[(coord.0 * 5 + coord.1) as usize] != 0 {
-            return Err("既に石があります");
-        } else if 0 < self.players_has_piece[now_turn_player] {
-            if self.is_there_surrounding_piece(ohajiki_num, coord) {
-                return Err("周りに既に石があります");
-            } else {
-                self.prev_board = self.board_data;
-
-                //スナップショット保存
-                self.board_histroy.push(Snapshot {
-                    steps: self.steps,
-                    players_has_piece: self.players_has_piece,
-                    board_data: self.board_data,
-                    turn: self.turn,
-                });
-
-                //変更
-                self.board_data[(coord.0 * 5 + coord.1) as usize] = ohajiki_num;
-                self.players_has_piece[now_turn_player] -= 1;
-                self.next_turn();
-                self.steps += 1;
-                return Ok(());
-            }
-        } else {
-            return Err("もう置く石がありません");
-        }
-    }
-    fn flick_ohajiki_force(&mut self, coord: (u64, u64), angle: (i64, i64)) {
-        //スナップショット保存
-        let snapshot_before_change = Snapshot {
-            steps: self.steps,
-            players_has_piece: self.players_has_piece,
-            board_data: self.board_data,
-            turn: self.turn,
-        };
-
-        let now_board = self.board_data.clone();
-
-        let mut target = self.board_data[(coord.0 * 5 + coord.1) as usize];
-        let mut target_coord: (isize, isize) = (coord.0 as isize, coord.1 as isize);
-
-        let mut next: (isize, isize); //default 処理中での移動先の座標を示す。
-
-        while target != 0 {
-            next = (
-                target_coord.0 + (angle.0 as isize),
-                target_coord.1 + (angle.1 as isize),
-            );
-
-            if next.0 < 0 || 5 as isize <= next.0 || next.1 < 0 || 5 as isize <= next.1 {
-                target = 0;
-            } else {
-                let u_next = (next.0 as usize, next.1 as usize);
-                let u_target_coord = (target_coord.0 as usize, target_coord.1 as usize);
-
-                match self.board_data[u_next.0 * 5 + u_next.1] {
-                    0 => {
-                        //移動先に何もない場合
-                        self.board_data[u_next.0 * 5 + u_next.1] = target;
-                        self.board_data[u_target_coord.0 * 5 + u_target_coord.1] = 0;
-                        target_coord = next;
-                    }
-                    _ => {
-                        //移動先に駒がある場合
-                        target_coord = next;
-                        target = self.board_data[u_next.0 * 5 + u_next.1];
-                    }
-                }
-            }
-        }
-
-        self.next_turn();
-        self.steps += 1;
-
-        //前の手を保存
-        self.prev_board = now_board;
-        //スナップショット保存
-        self.board_histroy.push(snapshot_before_change);
-    }
-    fn flick_ohajiki(&mut self, coord: (u64, u64), angle: (i64, i64)) -> Result<(), &'static str> {
-        //スナップショット保存
-        let snapshot_before_change = Snapshot {
-            steps: self.steps,
-            players_has_piece: self.players_has_piece,
-            board_data: self.board_data,
-            turn: self.turn,
-        };
-
-        let now_turn_player = ((-self.turn + 1) / 2) as usize;
-        let ohajiki_num: u8 = (now_turn_player + 1).try_into().unwrap();
-
-        let now_board = self.board_data.clone();
-
-        let mut target = self.board_data[(coord.0 * 5 + coord.1) as usize];
-        let mut target_coord: (isize, isize) = (coord.0 as isize, coord.1 as isize);
-
-        if target != ohajiki_num {
-            return Err("他人の駒をはじくことはできません");
-        }
-
-        let mut next: (isize, isize); //default 処理中での移動先の座標を示す。
-
-        let mut roops = 0;
-
-        while target != 0 {
-            roops += 1;
-
-            next = (
-                target_coord.0 + angle.0 as isize,
-                target_coord.1 + angle.1 as isize,
-            );
-
-            if next.0 < 0 || 5 as isize <= next.0 || next.1 < 0 || 5 as isize <= next.1 {
-                target = 0;
-            } else {
-                let u_next = (next.0 as usize, next.1 as usize);
-                let u_target_coord = (target_coord.0 as usize, target_coord.1 as usize);
-
-                match self.board_data[u_next.0 * 5 + u_next.1] {
-                    0 => {
-                        //移動先に何もない場合
-                        self.board_data[u_next.0 * 5 + u_next.1] = target;
-                        self.board_data[u_target_coord.0 * 5 + u_target_coord.1] = 0;
-                        target_coord = next;
-                    }
-                    _ => {
-                        //移動先に駒がある場合
-                        target_coord = next;
-                        target = self.board_data[u_next.0 * 5 + u_next.1];
-                    }
-                }
-            }
-        }
-
-        if roops == 0 {
-            //なにも駒がうごかないはじきは禁止
-            return Err("その手はできません");
-        } else {
-            //駒が動かないはじきを禁止
-            {
-                let mut is_all = true;
-                for i in 0..5 {
-                    for j in 0..5 {
-                        if self.board_data[i * 5 + j] != now_board[i * 5 + j] {
-                            is_all = false;
-                            break;
-                        }
-                    }
-                    if !is_all {
-                        break;
-                    }
-                }
-                if is_all {
-                    return Err("駒が動かないはじきはできません");
-                }
-            }
-
-            //千日手の防止
-            for i in 0..5 {
-                for j in 0..5 {
-                    if self.board_data[i * 5 + j] != self.prev_board[i * 5 + j] {
-                        self.next_turn();
-                        self.steps += 1;
-
-                        //前の手を保存
-                        self.prev_board = now_board;
-                        //スナップショット保存
-                        self.board_histroy.push(snapshot_before_change);
-
-                        return Ok(());
-                    }
-                }
-            }
-            //千日手の制約に引っかかる場合
-            for i in 0..5 {
-                //元の盤面に戻す
-                for j in 0..5 {
-                    self.board_data[i * 5 + j] = now_board[i * 5 + j];
-                }
-            }
-            return Err("千日手です");
-        }
-    }
-    fn winners(&mut self) -> Eval {
-        win_eval_bit_shift(self)
-    }
-    fn _to_string(&self) -> String {
-        let vidro = self;
-        let mut buf = String::new();
-
-        buf += "now turn player: ";
-        buf += &((vidro.turn - 1) / (-2)).to_string();
-        buf += "\n";
-        buf += "now steps: ";
-        buf += &vidro.steps.to_string();
-        buf += "\n";
-
-        buf += "  0 1 2 3 4\n";
-        for i in 0..5 {
-            buf += &i.to_string();
-
-            for j in 0..5 {
-                buf += "\u{001b}[";
-                buf += &(30 + vidro.board_data[i * 5 + j]).to_string();
-                buf += if vidro.board_data[i * 5 + j] == 0 {
-                    r"m  "
-                } else {
-                    r"m● "
-                };
-                buf += COLOR_RESET;
-            }
-            buf += "\n";
-        }
-
-        for i in 0..vidro.num_player {
-            buf += "player";
-            buf += &i.to_string();
-            buf += ": ";
-            buf += &vidro.players_has_piece[i as usize].to_string();
-            buf += "\n";
-        }
-
-        return buf;
-    }
-    fn to_hash(&self) -> u64 {
-        let mut hash = 0u64;
-        for &trout_state in &self.board_data {
-            hash += trout_state as u64;
-            hash <<= 2;
-        }
-        hash += self.steps as u64 % 2;
-        hash
-    }
-    fn apply_move_force(&mut self, mv: &Move) {
-        match mv {
-            Move::Place { r, c } => self.set_ohajiki_force((*r, *c)),
-            Move::Flick { r, c, angle_idx } => {
-                self.flick_ohajiki_force((*r, *c), ANGLES[*angle_idx])
-            }
-        }
-    }
-    fn apply_move(&mut self, mv: &Move) -> Result<(), &'static str> {
-        match mv {
-            Move::Place { r, c } => self.set_ohajiki((*r, *c)),
-            Move::Flick { r, c, angle_idx } => self.flick_ohajiki((*r, *c), ANGLES[*angle_idx]),
-        }
-    }
-    fn undo_move(&mut self, _mv: &Move) -> Result<(), &'static str> {
-        if let Some(s) = self.board_histroy.pop() {
-            self.turn = s.turn;
-            self.steps = s.steps;
-            self.players_has_piece = s.players_has_piece;
-            self.board_data = s.board_data;
-            Ok(())
-        } else {
-            Err("以前の盤面データはありません。")
-        }
-    }
-}
-
-fn read_buffer() -> String {
-    let mut buffer = String::new();
-    io::stdin()
-        .read_line(&mut buffer)
-        .expect("Failed to read line.");
-    buffer.trim().to_string()
-}
-
-const COLOR_RESET: &str = "\u{001b}[0m";
-
-fn _play_vidro() {
-    let mut vidro = Vidro::new(0);
-    let mut buf = String::new();
-
-    let set_re = Regex::new(r"s\s+(\d+)\s+(\d+)").unwrap();
-    let flick_re = Regex::new(r"f\s+(\d+)\s+(\d+)\s+(\d)").unwrap();
-
-    let mut read_buf = String::new();
-
-    loop {
-        buf.clear();
-
-        //盤面作成
-        buf += "now turn player: ";
-        buf += &(vidro.steps % (vidro.num_player as usize)).to_string();
-        buf += "\n";
-
-        buf += "\u{001b}[47m  0 1 2 3 4\u{001b}[0m\n";
-        for i in 0..5 {
-            buf += "\u{001b}[47m";
-            buf += &i.to_string();
-            buf += "\u{001b}[0m";
-
-            for j in 0..5 {
-                buf += "\u{001b}[";
-                buf += &(30 + vidro.board_data[i * 5 + j]).to_string();
-                buf += if vidro.board_data[i * 5 + j] == 0 {
-                    r"m  "
-                } else {
-                    r"m● "
-                };
-                buf += COLOR_RESET;
-            }
-            buf += "\n";
-        }
-
-        for i in 0..vidro.num_player {
-            buf += "player";
-            buf += &i.to_string();
-            buf += ": ";
-            buf += &vidro.players_has_piece[i as usize].to_string();
-            buf += "\n";
-        }
-
-        buf += " 3 2 1\n 4 ● 0\n 5 6 7\n";
-        buf += "steps: ";
-        buf += &vidro.steps.to_string();
-
-        buf += "\nwinner: \n";
-
-        {
-            let winners = vidro.winners();
-            buf += &format!("{:#?}", winners);
-        }
-
-        println!("{}", buf);
-
-        read_buf.clear();
-        loop {
-            read_buf = read_buffer();
-
-            match set_re.captures(&read_buf) {
-                Some(caps) => {
-                    let coord = (
-                        caps[1].parse::<u64>().unwrap(),
-                        caps[2].parse::<u64>().unwrap(),
-                    );
-
-                    match vidro.set_ohajiki(coord) {
-                        Ok(()) => {
-                            break;
-                        } //成功
-                        Err(err) => {
-                            println!("{}", err);
-                            continue;
-                        }
-                    }
-                }
-                None => (),
-            }
-            match flick_re.captures(&read_buf) {
-                Some(caps) => {
-                    let coord = (
-                        caps[1].parse::<u64>().unwrap(),
-                        caps[2].parse::<u64>().unwrap(),
-                    );
-                    let angle = caps[3].parse::<usize>().unwrap();
-                    if angle < 8 {
-                        match vidro.flick_ohajiki(coord, ANGLES[angle]) {
-                            Ok(()) => {
-                                break;
-                            } //成功
-                            Err(err) => {
-                                println!("{}", err);
-                                continue;
-                            }
-                        }
-                    }
-                }
-                None => (),
-            }
-            println!(
-                "コマンドの読み取りに失敗しました。\ncommands:\n    set y/x\n    flick y/x angle"
-            );
-        }
-    }
-}
-
 //ここから下は探索専用
-fn generate_win_masks() -> Vec<u32> {
-    let mut masks = Vec::new();
 
-    //横
-    for row in 0..5 {
-        for col in 0..3 {
-            let mask = 0b111 << (row * 5 + col);
-            masks.push(mask);
-        }
-    }
-
-    //縦
-    for col in 0..5 {
-        for row in 0..3 {
-            let mask = (1 << (row * 5 + col))
-                | (1 << ((row + 1) * 5 + col))
-                | (1 << ((row + 2) * 5 + col));
-            masks.push(mask);
-        }
-    }
-
-    // 斜め
-    // 右下斜め
-    for row in 0..3 {
-        for col in 0..3 {
-            let mask = (1 << (row * 5 + col))
-                | (1 << ((row + 1) * 5 + (col + 1)))
-                | (1 << ((row + 2) * 5 + (col + 2)));
-            masks.push(mask);
-        }
-    }
-    // 左下斜め
-    for row in 0..3 {
-        for col in 2..5 {
-            let mask = (1 << (row * 5 + col))
-                | (1 << ((row + 1) * 5 + (col - 1)))
-                | (1 << ((row + 2) * 5 + (col - 2)));
-            masks.push(mask);
-        }
-    }
-
-    masks
-}
-
-use lazy_static::lazy_static;
-
-use crate::bitboard::MoveBit;
-lazy_static! {
-    static ref WIN_MASKS: Vec<u32> = generate_win_masks();
-}
-
-fn static_evaluation(vidro: &mut Vidro) -> i16 {
-    if let EvalValue::Win(v) = win_eval_bit_shift(&vidro).value {
-        return v as i16 * 30000;
-    }
+fn static_evaluation(vidro: &mut Bitboard, prev_move: Option<MoveBit>) -> i16 {
     let threats = evaluate_threats(&vidro);
     let have_piece = evaluate_have_piece(&vidro);
     let position = evaluate_position(&vidro);
-    let reach = evaluate_reach(vidro);
+    let reach = evaluate_reach(vidro, prev_move);
 
     // 自分の「詰めろ」になる手の数が多いほど、局面は有利
-    let my_threats = generate_threat_moves(vidro).len() as i16;
+    let my_threats = generate_threat_moves(vidro, prev_move).len() as i16;
     let threat_score = my_threats * 25; // 例：1つの脅威手を25点と評価
 
     // 相手の脅威の数も計算し、評価値から引くとなお良い
-    vidro.next_turn();
-    let opponent_threats = generate_threat_moves(vidro).len() as i16;
+    vidro.turn_change();
+    let opponent_threats = generate_threat_moves(vidro, prev_move).len() as i16;
     let opponent_threat_score = opponent_threats * 25;
-    vidro.next_turn(); // ★手番を必ず元に戻す
+    vidro.turn_change(); // ★手番を必ず元に戻す
 
     threats + have_piece * 100 + position + threat_score - opponent_threat_score
 }
 
-fn evaluate_position(vidro: &Vidro) -> i16 {
+fn evaluate_position(vidro: &Bitboard) -> i16 {
     let mut score = 0;
-    for i in 0..25 {
-        match vidro.board_data[i] {
-            1 => score += POSITION_SCORES[i], // プレイヤー1の駒
-            2 => score -= POSITION_SCORES[i], // プレイヤー2の駒
-            _ => (),
-        }
-    }
-
-    const MARGIN_WIDTH: u64 = 9;
-    let mut empty_bits = 0u64;
-    let mut player_bits = [0u64; 2];
-    for row in 0..5 {
-        for col in 0..5 {
-            let idx = row * 5 + col;
-            let bit_pos = row * MARGIN_WIDTH + col; //余白を用意
-            let c = vidro.board_data[idx as usize];
-            if c == 0 {
-                empty_bits |= 1 << bit_pos
-            } else {
-                player_bits[c as usize - 1] |= 1 << bit_pos;
-            }
-        }
-    }
-    const DIRS: [u64; 4] = [
-        1,                // 横
-        MARGIN_WIDTH,     // 縦
-        MARGIN_WIDTH - 1, // 右上斜め
-        MARGIN_WIDTH + 1, // 左上斜め
-    ];
-
-    //何も置かれていないマスから駒の周りのマスを消して置けるマスの数を考える
-    let mut can_set_map = [empty_bits; 2];
+    let mut players_bod = vidro.player_bods;
     for p in 0..2 {
-        for &dir in &DIRS {
-            can_set_map[p] &= !(player_bits[p] >> dir);
-            can_set_map[p] &= !(player_bits[p] << dir);
+        let p_turn = -(p as i16 * 2) + 1;
+        while players_bod[p] != 0 {
+            let mut idx = players_bod[p].trailing_zeros() as usize;
+            idx = idx / 5 + idx % FIELD_BOD_WIDTH as usize;
+            score += POSITION_SCORES[idx] * p_turn;
+            players_bod[p] &= players_bod[p] - 1;
         }
     }
-    score += can_set_map[0].count_ones() as i16 * vidro.players_has_piece[0] as i16;
-    score -= can_set_map[1].count_ones() as i16 * vidro.players_has_piece[1] as i16;
-
+    score += (vidro.can_set_count(0) as i16 - vidro.can_set_count(1) as i16) * 10;
     score
 }
 
@@ -658,11 +63,11 @@ const POSITION_SCORES: [i16; 25] = [
     10, 0, 9, 0, 10, //
 ];
 
-fn evaluate_have_piece(vidro: &Vidro) -> i16 {
-    vidro.players_has_piece[1] as i16 - vidro.players_has_piece[0] as i16
+fn evaluate_have_piece(vidro: &Bitboard) -> i16 {
+    vidro.have_piece[1] as i16 - vidro.have_piece[0] as i16
 }
 
-fn evaluate_threats(vidro: &Vidro) -> i16 {
+fn evaluate_threats(vidro: &Bitboard) -> i16 {
     const OPEN_TWO_SCORE: i16 = 0; // _XX_ (両側が空いている2)
     const SEMI_OPEN_TWO_SCORE: i16 = 300; // OXX_ や _XXO (片側が空いている2)
     const SEMI_OPEN_SPLIT_ONE_SCORE: i16 = 300; //X_X (1つ空きオープン)
@@ -670,27 +75,13 @@ fn evaluate_threats(vidro: &Vidro) -> i16 {
 
     const MARGIN_WIDTH: u64 = 9;
 
-    let mut empty_bits = 0u64;
-    let mut player_bits = [0u64; 2];
-
-    for row in 0..5 {
-        for col in 0..5 {
-            let idx = row * 5 + col;
-            let bit_pos = row * MARGIN_WIDTH + col; //余白bitを2つ用意
-            let c = vidro.board_data[idx as usize];
-            if c == 0 {
-                empty_bits |= 1 << bit_pos
-            } else {
-                player_bits[c as usize - 1] |= 1 << bit_pos;
-            }
-        }
-    }
+    let blank: u64 = FIELD_BOD & !(vidro.player_bods[0] | vidro.player_bods[1]); //空白マス
 
     let mut total_score = 0i16;
 
     for p in 0..2 {
-        let me = player_bits[p];
-        let opp = player_bits[1 - p];
+        let me = vidro.player_bods[p];
+        let opp = vidro.player_bods[1 - p];
         let mut player_score = 0i16;
 
         // 各方向へのシフト量を定義 (7x5盤面用)
@@ -704,32 +95,31 @@ fn evaluate_threats(vidro: &Vidro) -> i16 {
         for &d in &DIRS {
             // パターン1: オープンな2 (_XX_)
             // パターン: [空き, 自分, 自分, 空き]
-            let pattern_open_two =
-                (empty_bits >> 0) & (me >> d) & (me >> (d * 2)) & (empty_bits >> (d * 3));
+            let pattern_open_two = (blank >> 0) & (me >> d) & (me >> (d * 2)) & (blank >> (d * 3));
             player_score += pattern_open_two.count_ones() as i16 * OPEN_TWO_SCORE;
 
             // パターン2: 片側が空いた2 (OXX_)
             // パターン: [相手, 自分, 自分, 空き]
             let pattern_semi_open_two_a =
-                (opp >> 0) & (me >> d) & (me >> (d * 2)) & (empty_bits >> (d * 3));
+                (opp >> 0) & (me >> d) & (me >> (d * 2)) & (blank >> (d * 3));
             player_score += pattern_semi_open_two_a.count_ones() as i16 * SEMI_OPEN_TWO_SCORE;
 
             // パターン3: 片側が空いた2 (_XXO)
             // パターン: [空き, 自分, 自分, 相手]
             let pattern_semi_open_two_b =
-                (empty_bits >> 0) & (me >> d) & (me >> (d * 2)) & (opp >> (d * 3));
+                (blank >> 0) & (me >> d) & (me >> (d * 2)) & (opp >> (d * 3));
             player_score += pattern_semi_open_two_b.count_ones() as i16 * SEMI_OPEN_TWO_SCORE;
 
             // パターン4: 1つ空きのオープンな2 (_X_X_)
             // パターン: [空き, 自分, 空き, 自分, 空き]
-            let pattern_open_split_one = (empty_bits >> 0)
+            let pattern_open_split_one = (blank >> 0)
                 & (me >> d)
-                & (empty_bits >> (d * 2))
+                & (blank >> (d * 2))
                 & (me >> (d * 3))
-                & (empty_bits >> (d * 4));
+                & (blank >> (d * 4));
             player_score += pattern_open_split_one.count_ones() as i16 * OPEN_SPLIT_ONE_SCORE;
 
-            let pattern_semi_open_split_one = me & (empty_bits >> d) & (me >> (d * 2));
+            let pattern_semi_open_split_one = me & (blank >> d) & (me >> (d * 2));
             player_score +=
                 pattern_semi_open_split_one.count_ones() as i16 * SEMI_OPEN_SPLIT_ONE_SCORE;
         }
@@ -743,110 +133,6 @@ fn evaluate_threats(vidro: &Vidro) -> i16 {
     }
 
     total_score
-}
-
-fn win_eval_bit_shift(vidro: &Vidro) -> Eval {
-    let mut player_bits = [0u64; 2];
-    for row in 0..5 {
-        for col in 0..5 {
-            let idx = row * 5 + col;
-            let bit_pos = row * 7 + col; //余白bitを2つ用意
-            let c = vidro.board_data[idx];
-            if c != 0 {
-                player_bits[c as usize - 1] |= 1 << bit_pos;
-            }
-        }
-    }
-
-    let mut result = [false; 2];
-    for p in 0..2 {
-        let b = player_bits[p];
-
-        //一列が7になっていることに注意する
-        //横
-        if (b & (b >> 1) & (b >> 2)) != 0 {
-            result[p] = true;
-        }
-
-        //縦
-        if (b & (b >> 7) & (b >> 14)) != 0 {
-            result[p] = true;
-        }
-
-        //右下斜め
-        if (b & (b >> 8) & (b >> 16)) != 0 {
-            result[p] = true;
-        }
-
-        //左下斜め
-        if (b & (b >> 6) & (b >> 12)) != 0 {
-            result[p] = true;
-        }
-    }
-
-    let eval: i16 = if result[0] { 1 } else { 0 } + if result[1] { -1 } else { 0 };
-    let evaluated = result[0] || result[1];
-    let value = if evaluated {
-        if eval == 0 {
-            EvalValue::Draw
-        } else {
-            EvalValue::Win(eval)
-        }
-    } else {
-        EvalValue::Unknown
-    };
-    Eval { value, evaluated }
-}
-
-fn win_eval(vidro: &Vidro) -> Eval {
-    let mut result = [false; 2];
-
-    let cells = &vidro.board_data;
-
-    for i in 0..5 {
-        for j in 0..5 {
-            let idx = i + j * 5;
-            let c = cells[idx];
-            if c == 0 {
-                continue;
-            }
-
-            if i < 5 - 2 {
-                if c == cells[idx + 1] && c == cells[idx + 2] {
-                    result[c as usize - 1] = true;
-                }
-            }
-            if j < 5 - 2 {
-                if c == cells[idx + 5] && c == cells[idx + 10] {
-                    result[c as usize - 1] = true;
-                }
-            }
-            if i < 5 - 2 && j < 5 - 2 {
-                if c == cells[idx + 6] && c == cells[idx + 12] {
-                    result[c as usize - 1] = true;
-                }
-                if c == cells[idx + 4] && c == cells[idx + 8] {
-                    result[c as usize - 1] = true;
-                }
-            }
-        }
-    }
-
-    let eval: i16 = if result[0] { 1 } else { 0 } + if result[1] { -1 } else { 0 };
-    let evaluted = result[0] || result[1];
-    let value = if evaluted {
-        if eval == 0 {
-            EvalValue::Draw
-        } else {
-            EvalValue::Win(eval)
-        }
-    } else {
-        EvalValue::Unknown
-    };
-    Eval {
-        value: value,
-        evaluated: evaluted,
-    }
 }
 
 const BOARD_SIZE: usize = 5;
@@ -920,61 +206,64 @@ const fn apply_transfrom(board_data: &[u8; 25], t: u8) -> [u8; 25] {
     result
 }
 
-fn evaluate_reach(vidro: &mut Vidro) -> i16 {
-    vidro.next_turn(); //意図的に手番を書き換え2手差しさせたときに勝利することがあるかを調べる
-    let moves = create_legal_moves_only_flick(vidro);
+fn evaluate_reach(vidro: &mut Bitboard, prev_move: Option<MoveBit>) -> i16 {
+    vidro.turn_change(); //意図的に手番を書き換え2手差しさせたときに勝利することがあるかを調べる
+    let moves = vidro.generate_legal_move(prev_move);
     let turn = vidro.turn;
-    for mv in &moves {
-        vidro.apply_move_force(mv);
-        if let EvalValue::Win(value) = win_eval_bit_shift(vidro).value {
+    for &mv in &moves {
+        vidro.apply_force(mv);
+        if let EvalValue::Win(value) = vidro.win_eval().value {
             if value as i8 == turn {
-                vidro.undo_move(mv).unwrap();
-                vidro.next_turn();
-                return value as i16
-                    * (10 - vidro.players_has_piece[0] - vidro.players_has_piece[1]) as i16
-                    * 15;
+                vidro.undo_force(mv);
+                vidro.turn_change();
+                return value as i16 * (10 - vidro.have_piece[0] - vidro.have_piece[1]) as i16 * 15;
             }
         }
-        vidro.undo_move(mv).unwrap();
+        vidro.undo_force(mv);
     }
-    vidro.next_turn();
+    vidro.turn_change();
     return 0;
 }
 
-fn find_mate_in_one_move(vidro: &mut Vidro) -> Option<Move> {
-    let moves = create_legal_moves_only_flick(vidro);
+fn find_mate_in_one_move(vidro: &mut Bitboard) -> Option<MoveBit> {
+    let moves = vidro.generate_legal_move(None); //詰み探索には千日手を除くことはしなくてよい。積んでいる局面になったときに千日手盤面になることはないため
     let turn = vidro.turn;
-    for mv in &moves {
-        vidro.apply_move_force(mv);
-        if let EvalValue::Win(value) = win_eval_bit_shift(vidro).value {
+    for &mv in &moves {
+        vidro.apply_force(mv);
+        if let EvalValue::Win(value) = vidro.win_eval().value {
             if value as i8 == turn {
-                vidro.undo_move(mv).unwrap();
-                return Some(*mv);
+                vidro.undo_force(mv);
+                return Some(mv);
             }
         }
-        vidro.undo_move(mv).unwrap();
+        vidro.undo_force(mv);
     }
     None
 }
 
 //先後最善を指した時の詰み手順
-fn find_mate_sequence(vidro: &mut Vidro, max_depth: usize) -> Option<Vec<Move>> {
-    if vidro.players_has_piece[((-vidro.turn + 1) / 2) as usize] > 2 {
+fn find_mate_sequence(
+    vidro: &mut Bitboard,
+    max_depth: usize,
+    prev_move: Option<MoveBit>,
+) -> Option<Vec<MoveBit>> {
+    if vidro.have_piece[((-vidro.turn + 1) / 2) as usize] > 2 {
         return None;
     }
 
     let mut sequence = Vec::new();
     //詰みがあるかどうかをしらべてある場合は手順を構築する
-    let result = find_mate_sequence_recursive(vidro, max_depth, usize::MIN, usize::MAX, true);
+    let result =
+        find_mate_sequence_recursive(vidro, max_depth, usize::MIN, usize::MAX, true, prev_move);
 
     if let Some((_, first_move)) = result {
         //手順構築
         sequence.push(first_move);
 
-        vidro.apply_move_force(&first_move);
+        vidro.apply_force(first_move);
 
         let mut idx = 0;
-        while !win_eval_bit_shift(vidro).evaluated {
+        while !vidro.win_eval().evaluated {
             if sequence.len() >= max_depth {
                 break;
             }
@@ -989,13 +278,14 @@ fn find_mate_sequence(vidro: &mut Vidro, max_depth: usize) -> Option<Vec<Move>> 
                 usize::MIN,
                 usize::MAX,
                 is_attacker,
+                Some(first_move),
             ) {
-                vidro.apply_move_force(&best_next_move);
+                vidro.apply_force(best_next_move);
                 sequence.push(best_next_move);
             } else {
                 //手順が見つからなかった(バグの可能性が高い)
-                for mv in sequence.iter().rev() {
-                    vidro.undo_move(mv).unwrap();
+                for &mv in sequence.iter().rev() {
+                    vidro.undo_force(mv);
                 }
                 return None;
             }
@@ -1003,8 +293,8 @@ fn find_mate_sequence(vidro: &mut Vidro, max_depth: usize) -> Option<Vec<Move>> 
         }
 
         //見つかった手順を使って盤面を呼び出し前の状態に復元
-        for mv in sequence.iter().rev() {
-            vidro.undo_move(mv).unwrap();
+        for &mv in sequence.iter().rev() {
+            vidro.undo_force(mv);
         }
 
         Some(sequence)
@@ -1014,12 +304,13 @@ fn find_mate_sequence(vidro: &mut Vidro, max_depth: usize) -> Option<Vec<Move>> 
 }
 
 fn find_mate_sequence_recursive(
-    vidro: &mut Vidro,
+    vidro: &mut Bitboard,
     depth: usize,
     alpha: usize,
     beta: usize,
     is_attacker: bool,
-) -> Option<(usize, Move)> {
+    prev_move: Option<MoveBit>,
+) -> Option<(usize, MoveBit)> {
     //一手詰め判定
     if is_attacker {
         if let Some(mv) = find_mate_in_one_move(vidro) {
@@ -1036,18 +327,19 @@ fn find_mate_sequence_recursive(
 
     if is_attacker {
         //見つかったときのdepthが大きい物(短く詰ませる)手を探す
-        let attacking_moves = generate_threat_moves(vidro);
+        let attacking_moves = vidro.generate_maybe_threat_moves(prev_move);
         if attacking_moves.is_empty() {
             return None;
         }
 
         let mut max_depth_found = usize::MIN; //最終的な詰みの深さ
-        let mut best_move: Option<Move> = None;
+        let mut best_move: Option<MoveBit> = None;
 
         for mv in attacking_moves {
-            vidro.apply_move_force(&mv);
-            let result = find_mate_sequence_recursive(vidro, depth - 1, alpha, beta, false);
-            vidro.undo_move(&mv).unwrap(); //ミスを防ぐためにすぐ戻す
+            vidro.apply_force(mv);
+            let result =
+                find_mate_sequence_recursive(vidro, depth - 1, alpha, beta, false, Some(mv));
+            vidro.undo_force(mv); //ミスを防ぐためにすぐ戻す
             //
             // 相手の手番で再帰呼び出し
             if let Some((found_depth, _)) = result {
@@ -1067,20 +359,21 @@ fn find_mate_sequence_recursive(
     } else {
         //見つかったときのdepthが小さい物(長く詰まされる)手を探す
         //特に効率の良い守る手を見つける方法はないため合法手から絞り込むことにする
-        let defending_moves = create_legal_moves(vidro);
+        let defending_moves = vidro.generate_legal_move(prev_move);
         //合法手が一つもないということは起きないため空の場合は考えない
         // if defending_moves.is_empty() {
         // return Some(depth + 1);
         // }
 
         let mut min_depth_found = usize::MAX;
-        let mut best_move: Option<Move> = None;
+        let mut best_move: Option<MoveBit> = None;
 
         //相手の手番で再帰呼び出し
         for mv in defending_moves {
-            vidro.apply_move_force(&mv);
-            let result = find_mate_sequence_recursive(vidro, depth - 1, alpha, beta, true);
-            vidro.undo_move(&mv).unwrap();
+            vidro.apply_force(mv);
+            let result =
+                find_mate_sequence_recursive(vidro, depth - 1, alpha, beta, true, Some(mv));
+            vidro.undo_force(mv);
 
             if result.is_none() {
                 return None;
@@ -1107,9 +400,13 @@ fn find_mate_sequence_recursive(
 }
 
 // main関数などから呼び出すためのラッパー関数
-fn find_mate(vidro: &mut Vidro, max_depth: usize) -> Option<Move> {
-    let mut mate_move = Move::Place { r: 0, c: 0 };
-    if find_mate_recursive(vidro, max_depth, &mut mate_move) {
+fn find_mate(
+    vidro: &mut Bitboard,
+    max_depth: usize,
+    prev_move: Option<MoveBit>,
+) -> Option<MoveBit> {
+    let mut mate_move = MoveBit::from_idx(0, 8);
+    if find_mate_recursive(vidro, max_depth, &mut mate_move, prev_move) {
         Some(mate_move)
     } else {
         None
@@ -1117,29 +414,34 @@ fn find_mate(vidro: &mut Vidro, max_depth: usize) -> Option<Move> {
 }
 
 // 詰み探索の本体（再帰関数）
-fn find_mate_recursive(vidro: &mut Vidro, depth: usize, mate_move: &mut Move) -> bool {
+fn find_mate_recursive(
+    vidro: &mut Bitboard,
+    depth: usize,
+    mate_move: &mut MoveBit,
+    prev_move: Option<MoveBit>,
+) -> bool {
     //深さ切れ(詰みなしと判断)
     if depth == 0 {
         return false;
     }
 
-    let attacking_moves = generate_threat_moves(vidro);
+    let attacking_moves = generate_threat_moves(vidro, prev_move);
     if attacking_moves.is_empty() {
         return false; //詰めろを掛けられない
     }
 
     //OR探索
     for mv in attacking_moves {
-        vidro.apply_move_force(&mv);
+        vidro.apply_force(mv);
 
         //受けが無くなっているかどうかを調べる
-        if check_opponent_defense(vidro, depth - 1, mate_move) {
+        if check_opponent_defense(vidro, depth - 1, mate_move, Some(mv)) {
             //受けがないことが確定 == 詰みが見つかった
-            vidro.undo_move(&mv).unwrap();
+            vidro.undo_force(mv);
             *mate_move = mv.clone(); //最後の代入の値==最初に指す手==詰み手順に入る時の手
             return true;
         }
-        vidro.undo_move(&mv).unwrap();
+        vidro.undo_force(mv);
     }
 
     //どの手も詰みにならなかった
@@ -1149,9 +451,14 @@ fn find_mate_recursive(vidro: &mut Vidro, depth: usize, mate_move: &mut Move) ->
 //NOTE! 詰みの読み筋を相手の物も含めるようにする
 
 //受けがないかどうか
-fn check_opponent_defense(vidro: &mut Vidro, depth: usize, mate_move: &mut Move) -> bool {
+fn check_opponent_defense(
+    vidro: &mut Bitboard,
+    depth: usize,
+    mate_move: &mut MoveBit,
+    prev_move: Option<MoveBit>,
+) -> bool {
     //勝になっていないかを確認
-    if let EvalValue::Win(v) = win_eval_bit_shift(vidro).value {
+    if let EvalValue::Win(v) = vidro.win_eval().value {
         if v as i8 == -vidro.turn {
             return true;
         }
@@ -1161,7 +468,7 @@ fn check_opponent_defense(vidro: &mut Vidro, depth: usize, mate_move: &mut Move)
         return false;
     }
 
-    let defending_moves = generate_defense_moves(vidro);
+    let defending_moves = vidro.generate_legal_move(prev_move);
     if defending_moves.is_empty() {
         //受けなし
         return true;
@@ -1169,12 +476,12 @@ fn check_opponent_defense(vidro: &mut Vidro, depth: usize, mate_move: &mut Move)
 
     // 生成した受け手の全ての応手に対して、詰み手順が続くか調べる (AND検索)
     for mv in defending_moves {
-        vidro.apply_move_force(&mv);
+        vidro.apply_force(mv);
 
         // 自分が再度攻めて詰むかどうかを再帰的に調べる
-        let can_mate = find_mate_recursive(vidro, depth - 1, mate_move);
+        let can_mate = find_mate_recursive(vidro, depth - 1, mate_move, Some(mv));
 
-        vidro.undo_move(&mv).unwrap();
+        vidro.undo_force(mv);
 
         if !can_mate {
             // 相手のこの受けで詰みが途切れた。
@@ -1187,138 +494,54 @@ fn check_opponent_defense(vidro: &mut Vidro, depth: usize, mate_move: &mut Move)
     true
 }
 
-fn is_reach(vidro: &mut Vidro) -> bool {
-    vidro.next_turn(); //意図的に手番を書き換え2手差しさせたときに勝利することがあるかを調べる
+fn is_reach(vidro: &mut Bitboard) -> bool {
+    vidro.turn_change(); //意図的に手番を書き換え2手差しさせたときに勝利することがあるかを調べる
     let result = checkmate_in_one_move(vidro);
-    vidro.next_turn(); //手番を戻す
+    vidro.turn_change(); //手番を戻す
     result
 }
 
-fn checkmate_in_one_move(vidro: &mut Vidro) -> bool {
-    let moves = create_legal_moves_only_flick(vidro);
+fn checkmate_in_one_move(vidro: &mut Bitboard) -> bool {
+    let moves = vidro.generate_legal_move_only_flick(None);
     let turn = vidro.turn;
-    for mv in &moves {
-        vidro.apply_move_force(mv);
-        if let EvalValue::Win(value) = win_eval_bit_shift(vidro).value {
+    for &mv in &moves {
+        vidro.apply_force(mv);
+        if let EvalValue::Win(value) = vidro.win_eval().value {
             if value as i8 == turn {
-                vidro.undo_move(mv).unwrap();
+                vidro.undo_force(mv);
                 return true;
             }
         }
-        vidro.undo_move(mv).unwrap();
+        vidro.undo_force(mv);
     }
     false
 }
 
-fn generate_threat_moves(vidro: &mut Vidro) -> Vec<Move> {
-    let mut moves = create_legal_moves(vidro);
-    moves.retain(|mv| {
-        vidro.apply_move_force(mv);
+fn generate_threat_moves(vidro: &mut Bitboard, prev_move: Option<MoveBit>) -> Vec<MoveBit> {
+    let mut moves = vidro.generate_legal_move(prev_move);
+    moves.retain(|&mv| {
+        vidro.apply_force(mv);
         //詰めろ(自殺手を除く)
         if is_reach(vidro) && !checkmate_in_one_move(vidro) {
-            vidro.undo_move(mv).unwrap();
+            vidro.undo_force(mv);
             return true;
         }
-        vidro.undo_move(mv).unwrap();
+        vidro.undo_force(mv);
         false
     });
     moves
 }
 
-fn generate_defense_moves(vidro: &mut Vidro) -> Vec<Move> {
-    let mut moves = create_legal_moves(vidro);
-    moves.retain(|mv| {
-        vidro.apply_move_force(mv);
-        if !checkmate_in_one_move(vidro) {
-            vidro.undo_move(mv).unwrap();
-            return true;
-        }
-        vidro.undo_move(mv).unwrap();
-        false
-    });
-    moves
-}
-
-fn quick_eval(board: &Vidro) -> i8 {
-    let mut eval1 = 0i8;
-    for i in 0..9 {
-        eval1 += board.board_data[(i % 3) * 2 + (i / 3) * 10] as i8 * (-2) + 3; //角と辺の中央の評価をあげる
-    }
-    (board.players_has_piece[1] as i8 - board.players_has_piece[0] as i8) + eval1
-}
-
-fn order_children(children: &mut Vec<Vidro>, turn: u8) {
-    children.sort_by_key(|board| {
-        let val = quick_eval(board);
-        if turn == 0 { -val } else { val }
-    });
-}
-
-fn create_legal_moves_only_flick(target_board: &mut Vidro) -> Vec<Move> {
-    let mut movable: Vec<Move> = Vec::new();
-
-    //可能な限りの子を作成
-    for i in 0..5 {
-        for j in 0..5 {
-            for a in 0..8 {
-                if let Ok(()) = target_board.flick_ohajiki((i, j), ANGLES[a]) {
-                    //テキトー置きが成功したとき
-                    let mv = Move::Flick {
-                        r: i,
-                        c: j,
-                        angle_idx: a,
-                    };
-                    target_board.undo_move(&mv).unwrap(); //変更が加わってしまった盤面を元に戻す
-                    movable.push(mv);
-                }
-            }
-        }
-    }
-    return movable;
-}
-
-fn create_legal_moves(target_board: &mut Vidro) -> Vec<Move> {
-    let mut movable: Vec<Move> = Vec::new();
-
-    //可能な限りの子を作成
-    for i in 0..5 {
-        for j in 0..5 {
-            if let Ok(()) = target_board.set_ohajiki((i, j)) {
-                //テキトー置きが成功したとき
-                let mv = Move::Place { r: i, c: j };
-                target_board.undo_move(&mv).unwrap(); //変更が加わってしまった盤面を元に戻す
-                movable.push(mv);
-            }
-        }
-    }
-    for i in 0..5 {
-        for j in 0..5 {
-            for a in 0..8 {
-                if let Ok(()) = target_board.flick_ohajiki((i, j), ANGLES[a]) {
-                    //テキトー置きが成功したとき
-                    let mv = Move::Flick {
-                        r: i,
-                        c: j,
-                        angle_idx: a,
-                    };
-                    target_board.undo_move(&mv).unwrap(); //変更が加わってしまった盤面を元に戻す
-                    movable.push(mv);
-                }
-            }
-        }
-    }
-    return movable;
-}
-
-fn evaluate_for_negamax(board: &mut Vidro) -> i16 {
-    static_evaluation(board) * board.turn as i16
+fn evaluate_for_negamax(board: &mut Bitboard, prev_move: Option<MoveBit>) -> i16 {
+    eval_mon(board, prev_move);
+    static_evaluation(board, prev_move) * board.turn as i16
 }
 
 #[derive(Clone, Default)]
 pub struct SearchInfo {
     pub depth: usize,
     pub score: i16,
-    pub pv: Vec<Move>,
+    pub pv: Vec<MoveBit>,
     pub nodes: usize,
 }
 
@@ -1326,7 +549,7 @@ pub struct SearchInfo {
 enum TTFlag {
     Exact,      // このスコアは真の評価値 (alpha < score < beta)
     LowerBound, // このスコアは下限値 (score >= beta, betaカットで得られた)
-    UpperBound, // このスコアは上限値 (score <= alpha, 有望な手が見つからなかった)
+    UpperBound, // このBitboardは上限値 (score <= alpha, 有望な手が見つからなかった)
 }
 
 // 置換表に保存するデータ構造
@@ -1335,7 +558,7 @@ struct TTEntry {
     score: i16,
     depth: u8, // 保存したときの探索深さ
     flag: TTFlag,
-    best_move: Move, // その局面で見つかった最善手
+    best_move: MoveBit, // その局面で見つかった最善手
 }
 
 const USE_CACHE: bool = true;
@@ -1345,7 +568,7 @@ const DRAW_SCORE: i16 = 0;
 const WIN_LOSE_SCORE: i16 = 30000;
 
 fn alphabeta(
-    board: &mut Vidro,
+    board: &mut Bitboard,
     depth: usize,
     mut alpha: i16,
     mut beta: i16,
@@ -1355,12 +578,12 @@ fn alphabeta(
     is_root: bool, // ★自分がルートノード（探索の起点）かを知るためのフラグ
     shared_info: Arc<Mutex<SearchInfo>>, // ★情報共有のための構造体
     log_file: &Arc<Mutex<File>>,
-) -> (i16, Vec<Move>) {
+    prev_move: Option<MoveBit>,
+) -> (i16, Vec<MoveBit>) {
     process.update(depth, board, tt.len());
     let mut best_pv = Vec::new();
-    let mut canonical_board_data = board.board_data;
-    canonical_board(&mut canonical_board_data);
-    let hash = board.to_hash();
+    // canonical_board(&mut canonical_board_data);
+    let hash = board.to_small_bod();
     //千日手判定
     if route.contains(&hash) {
         return (DRAW_SCORE, Vec::new()); //引き分け評価
@@ -1368,7 +591,7 @@ fn alphabeta(
     route.push(hash);
 
     //自己評価
-    let terminal_eval = win_eval_bit_shift(board);
+    let terminal_eval = board.win_eval();
     if terminal_eval.evaluated {
         route.pop();
         let score = if let EvalValue::Win(v) = terminal_eval.value {
@@ -1381,13 +604,13 @@ fn alphabeta(
 
     if depth == 0 {
         route.pop();
-        let static_score = evaluate_for_negamax(board);
+        let static_score = evaluate_for_negamax(board, prev_move);
         // let pattern_score = evaluate_threats(board);
         // let reach_score = evaluate_reach(board);
         // let position_score = evaluate_position(board);
         // let have_piece_score = evaluate_have_piece(board);
         // let num_pieces = board.players_has_piece[0] + board.players_has_piece[1];
-        let threat_moves_count = generate_threat_moves(board).len();
+        let threat_moves_count = generate_threat_moves(board, prev_move).len();
         //
         // //詰み探索を実行
         // let tsumi_found = if tsumi_result.is_some() { 1 } else { 0 };
@@ -1408,7 +631,7 @@ fn alphabeta(
         // writeln!(log_file.lock().unwrap(), "{}", log_line).expect("ログを書き込めませんでした");
 
         if threat_moves_count > 5 {
-            let tsumi_result = find_mate_sequence(board, 7);
+            let tsumi_result = find_mate_sequence(board, 7, prev_move);
             if let Some(mate_sequence) = tsumi_result {
                 // 詰みを発見！スコアを「勝ち」に格上げし、手順も返す
                 let mate_score = WIN_LOSE_SCORE - mate_sequence.len() as i16;
@@ -1419,7 +642,7 @@ fn alphabeta(
     }
 
     let original_alpha = alpha;
-    let mut best_move_from_tt: Option<Move> = None;
+    let mut best_move_from_tt: Option<MoveBit> = None;
     //置換表参照
     if USE_CACHE {
         if let Some(entry) = tt.get(&hash) {
@@ -1437,7 +660,7 @@ fn alphabeta(
         }
     }
 
-    let mut moves = create_legal_moves(board);
+    let mut moves = board.generate_legal_move(prev_move);
     if let Some(tt_move) = best_move_from_tt {
         if let Some(pos) = moves.iter().position(|m| *m == tt_move) {
             let m = moves.remove(pos);
@@ -1446,11 +669,11 @@ fn alphabeta(
     }
 
     let mut best_score = i16::MIN;
-    let mut best_move: Option<Move> = None;
+    let mut best_move: Option<MoveBit> = None;
 
-    for mv in &moves {
+    for &mv in &moves {
         //手を実行
-        board.apply_move_force(mv);
+        board.apply_force(mv);
         //その手ができた場合
         let (mut score, mut child_pv) = alphabeta(
             board,
@@ -1463,14 +686,15 @@ fn alphabeta(
             false,
             shared_info.clone(),
             log_file,
+            Some(mv),
         );
         score = -score;
-        board.undo_move(&mv).unwrap(); //元に戻す
+        board.undo_force(mv); //Bitboardに戻す
         if best_score < score {
             best_score = score;
-            best_move = Some(*mv);
+            best_move = Some(mv);
             best_pv.clear();
-            best_pv.push(*mv);
+            best_pv.push(mv);
             best_pv.append(&mut child_pv); // 本格的には子ノードのPVも連結する
 
             if is_root {
@@ -1522,7 +746,7 @@ impl Progress {
         }
     }
 
-    fn update(&mut self, current_depth: usize, board: &Vidro, tt_len: usize) {
+    fn update(&mut self, current_depth: usize, board: &Bitboard, tt_len: usize) {
         self.nodes_searched += 1;
         let now = Instant::now();
         if now.duration_since(self.last_print) >= Duration::from_secs(10) {
@@ -1537,11 +761,12 @@ impl Progress {
 }
 
 fn find_best_move(
-    board: &mut Vidro,
+    board: &mut Bitboard,
     max_depth: usize,
     tt: Arc<Mutex<LruCache<u64, TTEntry>>>,
     log_file: Arc<Mutex<File>>,
-) -> Option<Move> {
+    prev_move: Option<MoveBit>,
+) -> Option<MoveBit> {
     // if let Some(mate_sequence) = find_mate_sequence(board, 15) {
     //     // 15手詰みを探す
     //     println!("*** 詰み手順発見！ 初手: {:?} ***", mate_sequence[0]);
@@ -1553,7 +778,7 @@ fn find_best_move(
 
     let mut route: Vec<u64> = Vec::new();
 
-    let mut best_move: Option<Move> = None;
+    let mut best_move: Option<MoveBit> = None;
 
     let tt_for_thread = Arc::clone(&tt);
     let mut vidro_for_search = board.clone();
@@ -1562,7 +787,7 @@ fn find_best_move(
         let mut tt_guard = tt_for_thread.lock().unwrap();
         let mut process = Progress::new();
 
-        let mut best_move_overall: Option<Move> = None;
+        let mut best_move_overall: Option<MoveBit> = None;
 
         //反復深化ループ
         for depth_run in 0..=max_depth {
@@ -1580,6 +805,7 @@ fn find_best_move(
                 true,
                 shared_info.clone(),
                 &log_file,
+                prev_move,
             );
 
             //結果をUIに通知
@@ -1636,28 +862,35 @@ fn find_best_move(
     search_thread.join().unwrap()
 }
 
-fn eval_mon(bit_vidro: &mut Bitboard) -> i16 {
-    const N: usize = 1;
+fn eval_mon(bit_vidro: &mut Bitboard, prev_move: Option<MoveBit>) -> i16 {
+    const N: usize = 100;
     const MAX_EVAL: i16 = 1000;
     let mut eval = 0;
     for _ in 0..N {
         let mut moves = Vec::new();
-        let mut prev_move = None;
-        while !bit_vidro.game_over() {
-            println!("{}", bit_vidro.to_string());
-            bit_vidro.print_data();
-            let legal_move = bit_vidro.generate_legal_move(prev_move);
-            MoveBit::print_vec_to_string(&legal_move);
-            MoveBit::print_vec_to_string(&bit_vidro.generate_maybe_threat_moves(prev_move));
+        let mut prev_move_for_eval = prev_move;
+        let mut win_eval_result = Eval {
+            evaluated: false,
+            value: EvalValue::Unknown,
+        };
+        while !win_eval_result.evaluated {
+            // println!("{}", bit_vidro.to_string());
+            // bit_vidro.print_data();
+            let legal_move = bit_vidro.generate_legal_move(prev_move_for_eval);
+            // MoveBit::print_vec_to_string(&legal_move);
+            // MoveBit::print_vec_to_string(&bit_vidro.generate_maybe_threat_moves(prev_move_for_eval));
             let mut rng = thread_rng();
             // let mv = Bitboard::read_to_move();
             let mv = legal_move.choose(&mut rng).unwrap();
-            println!("決定手: {}", mv.to_string());
+            // println!("決定手: {}", mv.to_string());
             bit_vidro.apply_force(*mv);
             moves.push(*mv);
-            prev_move = Some(*mv);
+            prev_move_for_eval = Some(*mv);
+            win_eval_result = bit_vidro.win_eval();
         }
-        eval += bit_vidro.win_turn();
+        if let EvalValue::Win(v) = win_eval_result.value {
+            eval += v;
+        }
         for _ in 0..moves.len() {
             bit_vidro.undo_force(moves.pop().unwrap());
         }
@@ -1667,9 +900,9 @@ fn eval_mon(bit_vidro: &mut Bitboard) -> i16 {
 }
 
 fn main() {
-    let mut bit_vidro = Bitboard::new_initial();
-    println!("result: {}", eval_mon(&mut bit_vidro));
-    return;
+    // let mut bit_vidro = Bitboard::new_initial();
+    // println!("result: {}", eval_mon(&mut bit_vidro));
+    // return;
 
     // _play_vidro();
     // return;
@@ -1730,18 +963,19 @@ fn main() {
     )));
 
     for _ in 0..100 {
-        let mut vidro = Vidro::new(0);
+        let mut vidro = Bitboard::new_initial();
 
         let mut move_count = 0;
+        let mut prev_move = None;
         const MAX_MOVES: usize = 100;
         const RANDOM_MOVES_UNTIL: usize = 6;
 
         loop {
             println!("\n--------------------------------");
-            println!("{}", vidro._to_string());
+            println!("{}", vidro.to_string());
 
             {
-                let win_eval_result = win_eval_bit_shift(&vidro);
+                let win_eval_result = vidro.win_eval();
                 if win_eval_result.evaluated {
                     match win_eval_result.value {
                         EvalValue::Win(v) => {
@@ -1760,10 +994,10 @@ fn main() {
                 break;
             }
 
-            let best_move: Move;
+            let best_move: MoveBit;
             if move_count < RANDOM_MOVES_UNTIL {
                 println!("----ランダムループを選択----");
-                let legal_moves = create_legal_moves(&mut vidro);
+                let legal_moves = vidro.generate_legal_move(prev_move);
                 if legal_moves.is_empty() {
                     break;
                 }
@@ -1780,6 +1014,7 @@ fn main() {
                     search_depth,
                     tt_for_thread,
                     log_file_for_thread,
+                    prev_move,
                 ) {
                     Some(mv) => mv,
                     None => {
@@ -1789,7 +1024,8 @@ fn main() {
                 };
             }
             println!("\n決定手: {}", best_move.to_string());
-            vidro.apply_move_force(&best_move);
+            vidro.apply_force(best_move);
+            prev_move = Some(best_move);
 
             move_count += 1;
         }

@@ -1,7 +1,9 @@
+use std::result;
+
 use crate::bitboard_console::BitboardConsole;
 use crate::eval_value::{Eval, EvalValue};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Bitboard {
     pub player_bods: [u64; 2],
     pub have_piece: [u8; 2],
@@ -51,7 +53,7 @@ impl MoveBit {
 pub const BITBOD_WIDTH: u64 = 9;
 pub const FIELD_BOD_WIDTH: u64 = 5;
 pub const FIELD_BOD_HEIGHT: u64 = 5;
-const FIELD_BOD: u64 = {
+pub const FIELD_BOD: u64 = {
     const ROW_BIT: u64 = 0b11111;
     let mut result = 0u64;
     let mut r = 0u64;
@@ -277,6 +279,20 @@ impl Bitboard {
         }
         false
     }
+    pub fn can_set_count(&self, turn_player: usize) -> u32 {
+        //setの合法手を集める
+        let mut can_set_bod = self.player_bods[turn_player];
+        let can_set_bod_copy = self.player_bods[turn_player];
+        for angle in ANGLE {
+            can_set_bod |= can_set_bod_copy << angle;
+            can_set_bod |= can_set_bod_copy >> angle;
+        }
+        can_set_bod = !can_set_bod; //反転して欲しいものにする
+        can_set_bod &= !self.player_bods[1 - turn_player];
+        can_set_bod &= FIELD_BOD;
+
+        can_set_bod.count_ones()
+    }
     pub fn win_turn(&self) -> i16 {
         let mut result = [0i16; 2];
         for p in 0..2 {
@@ -481,6 +497,61 @@ impl Bitboard {
 
         result
     }
+    pub fn generate_legal_move_only_flick(&self, prev_move: Option<MoveBit>) -> Vec<MoveBit> {
+        let mut result = Vec::new();
+        let turn_player = ((-self.turn + 1) / 2) as usize;
+
+        //flickの合法手を集める
+        let (prev, is_root) = if let Some(mv) = prev_move {
+            (mv, false)
+        } else {
+            (MoveBit::new(0, 0, 0), true)
+        };
+        let prev_angle = ANGLE[prev.angle_idx as usize % 4] as u8;
+        let blank: u64 = FIELD_BOD & !(self.player_bods[0] | self.player_bods[1]); //空白マス
+        let is_prev_left_direction = prev.angle_idx < 4;
+        for angle_idx in 0..ANGLE.len() as u8 {
+            let angle = ANGLE[angle_idx as usize];
+            let mut can_flick_bod1 = self.player_bods[turn_player] & (blank >> angle);
+            let mut can_flick_bod2 = self.player_bods[turn_player] & (blank << angle);
+
+            while can_flick_bod1 != 0 {
+                let idx = can_flick_bod1.trailing_zeros() as u8;
+
+                let is_repetition_of_moves = {
+                    let difference_of_idx = idx.abs_diff(prev.idx);
+                    !is_prev_left_direction
+                        && prev.angle_idx % 4 == angle_idx
+                        && difference_of_idx % prev_angle == 0
+                        && difference_of_idx / prev_angle <= 5
+                        && !is_root
+                };
+                if !is_repetition_of_moves {
+                    result.push(MoveBit::from_idx(idx, angle_idx));
+                }
+                can_flick_bod1 &= can_flick_bod1 - 1;
+            }
+
+            while can_flick_bod2 != 0 {
+                let idx = can_flick_bod2.trailing_zeros() as u8;
+
+                let is_repetition_of_moves = {
+                    let difference_of_idx = idx.abs_diff(prev.idx);
+                    is_prev_left_direction
+                        && prev.angle_idx % 4 == angle_idx
+                        && difference_of_idx % prev_angle == 0
+                        && difference_of_idx / prev_angle <= 5
+                        && !is_root
+                };
+                if !is_repetition_of_moves {
+                    result.push(MoveBit::from_idx(idx, angle_idx + 4));
+                }
+                can_flick_bod2 &= can_flick_bod2 - 1;
+            }
+        }
+
+        result
+    }
     pub fn generate_reach_bod(&self, player: usize) -> u64 {
         let piece_bod = self.player_bods[0] | self.player_bods[1];
         let turn_player_bod = self.player_bods[player];
@@ -593,6 +664,18 @@ impl Bitboard {
             }
         }
 
+        result
+    }
+    pub fn to_small_bod(&self) -> u64 {
+        use std::arch::x86_64::_pext_u64;
+        let mut result = 0u64;
+        let turn_player = ((-self.turn + 1) / 2) as usize;
+        unsafe {
+            result |= _pext_u64(self.player_bods[0], FIELD_BOD)
+                << (FIELD_BOD_WIDTH * FIELD_BOD_HEIGHT + 1);
+            result |= _pext_u64(self.player_bods[1], FIELD_BOD) << 1;
+            result |= turn_player as u64;
+        }
         result
     }
 }
