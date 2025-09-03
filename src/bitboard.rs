@@ -519,7 +519,7 @@ impl Bitboard {
         result &= FIELD_BOD;
         result
     }
-    pub fn generate_threat_moves(&self, prev_move: Option<MoveBit>) -> Vec<MoveBit> {
+    pub fn generate_maybe_threat_moves(&self, prev_move: Option<MoveBit>) -> Vec<MoveBit> {
         let mut result = Vec::new();
         let turn_player = ((-self.turn + 1) / 2) as usize;
         let threat_bod = self.generate_maybe_threat_bod(turn_player);
