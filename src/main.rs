@@ -1637,21 +1637,22 @@ fn find_best_move(
 }
 
 fn eval_mon(bit_vidro: &mut Bitboard) -> i16 {
-    const N: usize = 10000;
+    const N: usize = 1;
     const MAX_EVAL: i16 = 1000;
     let mut eval = 0;
     for _ in 0..N {
         let mut moves = Vec::new();
         let mut prev_move = None;
         while !bit_vidro.game_over() {
-            // println!("{}", bit_vidro.to_string());
-            // bit_vidro.print_data();
+            println!("{}", bit_vidro.to_string());
+            bit_vidro.print_data();
             let legal_move = bit_vidro.generate_legal_move(prev_move);
-            // MoveBit::print_vec_to_string(&legal_move);
+            MoveBit::print_vec_to_string(&legal_move);
+            MoveBit::print_vec_to_string(&bit_vidro.generate_threat_moves(prev_move));
             let mut rng = thread_rng();
             // let mv = Bitboard::read_to_move();
             let mv = legal_move.choose(&mut rng).unwrap();
-            // println!("決定手: {}", mv.to_string());
+            println!("決定手: {}", mv.to_string());
             bit_vidro.apply_force(*mv);
             moves.push(*mv);
             prev_move = Some(*mv);
