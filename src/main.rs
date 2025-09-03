@@ -1007,11 +1007,12 @@ fn main() {
                 use rand::seq::SliceRandom;
                 best_move = (*legal_moves.choose(&mut rand::thread_rng()).unwrap()).clone();
             } else {
-                // let is_turn_humen = vidro.turn == 1;
-                let is_turn_humen = false;
+                let is_turn_humen = vidro.turn == 1;
+                // let is_turn_humen = false;
                 if is_turn_humen {
                     println!("手を選択");
                     let legal_moves = vidro.generate_legal_move(prev_move);
+                    MoveBit::print_vec_to_string(&legal_moves);
                     while {
                         best_move = Bitboard::read_to_move();
                         !legal_moves.contains(&best_move)

@@ -457,8 +457,24 @@ impl Bitboard {
         let is_prev_left_direction = prev.angle_idx < 4;
         for angle_idx in 0..ANGLE.len() as u8 {
             let angle = ANGLE[angle_idx as usize];
-            let mut can_flick_bod1 = self.player_bods[turn_player] & (blank >> angle);
-            let mut can_flick_bod2 = self.player_bods[turn_player] & (blank << angle);
+
+            let is_there_gap1 = {
+                let mut result = 0u64;
+                for i in 1..5 {
+                    result |= blank >> angle * i;
+                }
+                result
+            };
+            let is_there_gap2 = {
+                let mut result = 0u64;
+                for i in 1..5 {
+                    result |= blank.wrapping_shl(angle as u32 * i);
+                }
+                result
+            };
+
+            let mut can_flick_bod1 = self.player_bods[turn_player] & is_there_gap1;
+            let mut can_flick_bod2 = self.player_bods[turn_player] & is_there_gap2;
 
             while can_flick_bod1 != 0 {
                 let idx = can_flick_bod1.trailing_zeros() as u8;
@@ -512,8 +528,24 @@ impl Bitboard {
         let is_prev_left_direction = prev.angle_idx < 4;
         for angle_idx in 0..ANGLE.len() as u8 {
             let angle = ANGLE[angle_idx as usize];
-            let mut can_flick_bod1 = self.player_bods[turn_player] & (blank >> angle);
-            let mut can_flick_bod2 = self.player_bods[turn_player] & (blank << angle);
+
+            let is_there_gap1 = {
+                let mut result = 0u64;
+                for i in 1..5 {
+                    result |= blank >> angle * i;
+                }
+                result
+            };
+            let is_there_gap2 = {
+                let mut result = 0u64;
+                for i in 1..5 {
+                    result |= blank.wrapping_shl(angle as u32 * i);
+                }
+                result
+            };
+
+            let mut can_flick_bod1 = self.player_bods[turn_player] & is_there_gap1;
+            let mut can_flick_bod2 = self.player_bods[turn_player] & is_there_gap2;
 
             while can_flick_bod1 != 0 {
                 let idx = can_flick_bod1.trailing_zeros() as u8;
