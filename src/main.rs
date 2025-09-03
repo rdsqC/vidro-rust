@@ -1648,7 +1648,7 @@ fn eval_mon(bit_vidro: &mut Bitboard) -> i16 {
             bit_vidro.print_data();
             let legal_move = bit_vidro.generate_legal_move(prev_move);
             MoveBit::print_vec_to_string(&legal_move);
-            MoveBit::print_vec_to_string(&bit_vidro.generate_threat_moves(prev_move));
+            MoveBit::print_vec_to_string(&bit_vidro.generate_maybe_threat_moves(prev_move));
             let mut rng = thread_rng();
             // let mv = Bitboard::read_to_move();
             let mv = legal_move.choose(&mut rng).unwrap();
