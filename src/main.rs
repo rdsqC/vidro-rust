@@ -608,33 +608,17 @@ fn alphabeta(
 
     if depth == 0 {
         route.pop();
+        let tsumi_result = find_mate_sequence(board, 5, prev_move);
+
         let static_score = evaluate_for_negamax(board, prev_move);
-        // let pattern_score = evaluate_threats(board);
-        // let reach_score = evaluate_reach(board);
-        // let position_score = evaluate_position(board);
-        // let have_piece_score = evaluate_have_piece(board);
-        // let num_pieces = board.players_has_piece[0] + board.players_has_piece[1];
-        let threat_moves_count = generate_threat_moves(board, prev_move).len();
-        //
-        // //詰み探索を実行
-        // let tsumi_found = if tsumi_result.is_some() { 1 } else { 0 };
-        //
-        // let log_line = format!(
-        //     "{},{},{},{},{},{},{},{}\n",
-        //     tsumi_found,
-        //     static_score,
-        //     pattern_score,
-        //     reach_score,
-        //     position_score,
-        //     have_piece_score,
-        //     num_pieces,
-        //     threat_moves_count,
-        // );
+        //詰み探索を実行
+        let tsumi_found = if tsumi_result.is_some() { 1 } else { 0 };
+
+        let log_line = format!("{},{}", tsumi_found, board.to_small_bod());
 
         //ファイル出力
-        // writeln!(log_file.lock().unwrap(), "{}", log_line).expect("ログを書き込めませんでした");
+        writeln!(log_file.lock().unwrap(), "{}", log_line).expect("ログを書き込めませんでした");
 
-        let tsumi_result = find_mate_sequence(board, 1, prev_move);
         if let Some(mate_sequence) = tsumi_result {
             // board.print_data();
             // 詰みを発見！スコアを「勝ち」に格上げし、手順も返す
@@ -730,6 +714,12 @@ fn alphabeta(
             };
             tt.put(hash, new_entry);
         }
+    }
+
+    if 29900 < best_score {
+        let log_line = format!("{},{}", 1, board.to_small_bod());
+        //ファイル出力
+        writeln!(log_file.lock().unwrap(), "{}", log_line).expect("ログを書き込めませんでした");
     }
 
     route.pop(); // 探索パスから除去して戻る
@@ -950,12 +940,11 @@ fn main() {
         .expect("ログファイルを開けませんでした");
     let log_file = Arc::new(Mutex::new(log_file_obj));
     // CSVのヘッダーを書き込む（プログラム起動時に一度だけ）
-    // ファイルが空の場合のみ書き込むのがより丁寧ですが、ここでは簡略化します
 
     {
         if let Ok(meta) = metadata(path) {
             if meta.len() == 0 {
-                writeln!( log_file.lock().unwrap(), "static_score, pattern_score, reach_score, position_score, have_piece_score, num_pieces, threat_moves_count, tsumi_found")
+                writeln!(log_file.lock().unwrap(), " tsumi_found, small_bod")
                     .expect("ヘッダーを書き込めませんでした");
             }
         }
@@ -971,7 +960,7 @@ fn main() {
         let mut move_count = 0;
         let mut prev_move = None;
         const MAX_MOVES: usize = 100;
-        const RANDOM_MOVES_UNTIL: usize = 0;
+        const RANDOM_MOVES_UNTIL: usize = 6;
 
         loop {
             println!("\n--------------------------------");
@@ -1007,8 +996,8 @@ fn main() {
                 use rand::seq::SliceRandom;
                 best_move = (*legal_moves.choose(&mut rand::thread_rng()).unwrap()).clone();
             } else {
-                let is_turn_humen = vidro.turn == 1;
-                // let is_turn_humen = false;
+                // let is_turn_humen = vidro.turn == 1;
+                let is_turn_humen = false;
                 if is_turn_humen {
                     println!("手を選択");
                     let legal_moves = vidro.generate_legal_move(prev_move);
@@ -1019,7 +1008,7 @@ fn main() {
                     } {}
                 } else {
                     println!("思考中...");
-                    let search_depth = 7;
+                    let search_depth = 5;
 
                     let log_file_for_thread = Arc::clone(&log_file);
                     let tt_for_thread = Arc::clone(&tt);
