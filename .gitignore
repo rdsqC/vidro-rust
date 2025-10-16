@@ -1,1 +1,7 @@
 /target
+perf.data
+perf.data.old
+WSL2-Linux-Kernel
+flamegraph.svg
+venv
+tsumi_log*
