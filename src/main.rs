@@ -574,13 +574,13 @@ fn alphabeta(
     mut beta: i16,
     tt: &mut LruCache<u64, TTEntry>,
     route: &mut Vec<u64>,
-    process: &mut Progress,
+    // process: &mut Progress,
     is_root: bool, // ★自分がルートノード（探索の起点）かを知るためのフラグ
     shared_info: Arc<Mutex<SearchInfo>>, // ★情報共有のための構造体
     log_file: &Arc<Mutex<File>>,
     prev_move: Option<MoveBit>,
 ) -> (i16, Vec<MoveBit>) {
-    process.update(depth, board, tt.len());
+    // process.update(depth, board, tt.len());
     let mut best_pv = Vec::new();
     // canonical_board(&mut canonical_board_data);
     let hash = board.to_small_bod();
@@ -669,7 +669,7 @@ fn alphabeta(
             -alpha,
             tt,
             route,
-            process,
+            // process,
             false,
             shared_info.clone(),
             log_file,
@@ -688,7 +688,7 @@ fn alphabeta(
                 let mut info = shared_info.lock().unwrap();
                 info.score = best_score;
                 info.pv = best_pv.clone();
-                info.nodes = process.nodes_searched;
+                // info.nodes = process.nodes_searched;
             }
         }
         alpha = alpha.max(best_score);
@@ -794,7 +794,7 @@ fn find_best_move(
                 i16::MAX,
                 &mut tt_guard,
                 &mut route,
-                &mut process,
+                // &mut process,
                 true,
                 shared_info.clone(),
                 &log_file,
@@ -937,7 +937,7 @@ fn main() {
         .create(true)
         .append(true)
         .open(path)
-        .expect("ログファイルを開けませんでした");
+        .expect("ログファイルを開けませんでしたMaintainers and contributors of this project");
     let log_file = Arc::new(Mutex::new(log_file_obj));
     // CSVのヘッダーを書き込む（プログラム起動時に一度だけ）
 
@@ -954,7 +954,7 @@ fn main() {
         NonZeroUsize::new(100_000).unwrap(),
     )));
 
-    for _ in 0..100 {
+    loop {
         let mut vidro = Bitboard::new_initial();
 
         let mut move_count = 0;
