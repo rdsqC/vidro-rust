@@ -1,9 +1,6 @@
 use super::bitboard::{Bitboard, FIELD_BOD, FIELD_BOD_HEIGHT, FIELD_BOD_WIDTH, MoveBit};
-use super::bitboard_console::BitboardConsole;
 use super::checkmate_search::generate_threat_moves;
 use super::eval_value::{Eval, EvalValue};
-use Vec;
-use std::{io, usize};
 
 pub fn static_evaluation(vidro: &mut Bitboard, prev_move: Option<MoveBit>) -> i16 {
     let threats = evaluate_threats(&vidro);
