@@ -214,33 +214,6 @@ fn alphabeta(
     (best_score, best_pv)
 }
 
-struct Progress {
-    nodes_searched: usize,
-    last_print: Instant,
-}
-
-impl Progress {
-    fn new() -> Self {
-        Self {
-            nodes_searched: 0,
-            last_print: Instant::now(),
-        }
-    }
-
-    fn update(&mut self, current_depth: usize, board: &Bitboard, tt_len: usize) {
-        self.nodes_searched += 1;
-        let now = Instant::now();
-        if now.duration_since(self.last_print) >= Duration::from_secs(10) {
-            // println!(
-            //     "探索ノード数: {}, 現在深さ: {}, TT size:{}",
-            //     self.nodes_searched, current_depth, tt_len
-            // );
-            // println!("{}", board._to_string());
-            // self.last_print = now;
-        }
-    }
-}
-
 fn find_best_move(
     board: &mut Bitboard,
     max_depth: usize,
@@ -248,11 +221,11 @@ fn find_best_move(
     log_file: Arc<Mutex<File>>,
     prev_move: Option<MoveBit>,
 ) -> Option<MoveBit> {
-    // if let Some(mate_sequence) = find_mate_sequence(board, 15) {
-    //     // 15手詰みを探す
-    //     println!("*** 詰み手順発見！ 初手: {:?} ***", mate_sequence[0]);
-    //     return Some(mate_sequence[0].clone());
-    // }
+    if let Some(mate_sequence) = find_mate_sequence(board, 15, prev_move) {
+        // 15手詰みを探す
+        println!("*** 詰み手順発見！ 初手: {:?} ***", mate_sequence[0]);
+        return Some(mate_sequence[0].clone());
+    }
 
     let shared_info = Arc::new(Mutex::new(SearchInfo::default()));
     let info_clone_for_ui = shared_info.clone();
@@ -266,7 +239,6 @@ fn find_best_move(
 
     let search_thread = thread::spawn(move || {
         let mut tt_guard = tt_for_thread.lock().unwrap();
-        let mut process = Progress::new();
 
         let mut best_move_overall: Option<MoveBit> = None;
 
@@ -295,7 +267,6 @@ fn find_best_move(
                 info.score = score;
                 info.depth = depth_run;
                 info.pv = pv_sequence.clone();
-                info.nodes = process.nodes_searched;
             }
 
             if !pv_sequence.is_empty() {
