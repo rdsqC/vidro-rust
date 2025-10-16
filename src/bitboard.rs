@@ -1,5 +1,3 @@
-use std::result;
-
 use crate::bitboard_console::BitboardConsole;
 use crate::eval_value::{Eval, EvalValue};
 
