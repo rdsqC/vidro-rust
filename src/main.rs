@@ -96,7 +96,7 @@ fn alphabeta(
 
     if depth == 0 {
         route.pop();
-        let tsumi_result = find_mate_sequence(board, 5, prev_move);
+        let tsumi_result = find_mate_sequence(board, 3, prev_move);
 
         let static_score = evaluate_for_negamax(board, prev_move);
         //詰み探索を実行
@@ -105,7 +105,7 @@ fn alphabeta(
         let log_line = format!("{},{}", tsumi_found, board.to_small_bod());
 
         //ファイル出力
-        writeln!(log_file.lock().unwrap(), "{}", log_line).expect("ログを書き込めませんでした");
+        // writeln!(log_file.lock().unwrap(), "{}", log_line).expect("ログを書き込めませんでした");
 
         if let Some(mate_sequence) = tsumi_result {
             // board.print_data();
