@@ -49,7 +49,7 @@ struct TTEntry {
     best_move: MoveBit, // その局面で見つかった最善手
 }
 
-const USE_CACHE: bool = false;
+const USE_CACHE: bool = true;
 const USE_CACHE_DEPTH: usize = 8;
 
 const DRAW_SCORE: i16 = 0;
@@ -123,11 +123,15 @@ fn alphabeta(
         if let Some(entry) = tt.get(&hash) {
             if entry.depth as usize >= depth {
                 match entry.flag {
-                    TTFlag::Exact => return (entry.score, vec![entry.best_move]),
+                    TTFlag::Exact => {
+                        route.pop();
+                        return (entry.score, vec![entry.best_move]);
+                    }
                     TTFlag::LowerBound => alpha = alpha.max(entry.score),
                     TTFlag::UpperBound => beta = beta.min(entry.score),
                 }
                 if alpha >= beta {
+                    route.pop();
                     return (entry.score, vec![entry.best_move]);
                 }
             }
@@ -207,11 +211,89 @@ fn alphabeta(
     if 29900 < best_score {
         let log_line = format!("{},{}", 1, board.to_small_bod());
         //ファイル出力
-        writeln!(log_file.lock().unwrap(), "{}", log_line).expect("ログを書き込めませんでした");
+        // writeln!(log_file.lock().unwrap(), "{}", log_line).expect("ログを書き込めませんでした");
     }
 
     route.pop(); // 探索パスから除去して戻る
     (best_score, best_pv)
+}
+
+fn mtd_f(
+    board: &mut Bitboard,
+    f: i16,
+    depth: usize,
+    tt: Arc<Mutex<LruCache<u64, TTEntry>>>,
+    log_file: Arc<Mutex<File>>,
+    prev_move: Option<MoveBit>,
+) -> (i16, Option<MoveBit>) {
+    let shared_info = Arc::new(Mutex::new(SearchInfo::default()));
+    let info_clone_for_ui = shared_info.clone();
+    let tt_for_thread = Arc::clone(&tt);
+    let mut vidro_for_search = board.clone();
+
+    let search_thread = thread::spawn(move || {
+        let mut tt_guard = tt_for_thread.lock().unwrap();
+        let mut sequence: Vec<MoveBit> = Vec::new();
+        let mut g = f;
+        let mut upper_bound = i16::MAX;
+        let mut lower_bound = i16::MIN;
+        while lower_bound < upper_bound {
+            let beta: i16;
+            if g == lower_bound {
+                beta = g + 1;
+            } else {
+                beta = g;
+            }
+            let mut route = Vec::new();
+            (g, sequence) = alphabeta(
+                &mut vidro_for_search,
+                depth,
+                beta - 1,
+                beta,
+                &mut tt_guard,
+                &mut route,
+                true,
+                shared_info.clone(),
+                &log_file,
+                prev_move,
+            );
+            if g < beta {
+                upper_bound = g;
+            } else {
+                lower_bound = g;
+            }
+        }
+        (g, sequence.get(0).map(|mv| *mv))
+    });
+
+    println!("探索開始...");
+    loop {
+        thread::sleep(Duration::from_millis(200));
+        {
+            let info = info_clone_for_ui.lock().unwrap();
+            print!(
+                "\rDepth: {:2}, Score: {:6}, Nodes: {:8}, PV: {:<50}",
+                info.depth,
+                info.score,
+                info.nodes,
+                info.pv
+                    .iter()
+                    .map(|m| m.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
+
+            // 標準出力をフラッシュして即時表示
+            use std::io::Write;
+            std::io::stdout().flush().unwrap();
+        }
+
+        if search_thread.is_finished() {
+            break;
+        }
+    }
+
+    search_thread.join().unwrap()
 }
 
 fn find_best_move(
@@ -220,11 +302,15 @@ fn find_best_move(
     tt: Arc<Mutex<LruCache<u64, TTEntry>>>,
     log_file: Arc<Mutex<File>>,
     prev_move: Option<MoveBit>,
-) -> Option<MoveBit> {
+) -> (i16, Option<MoveBit>) {
+    //なくてもいい
     if let Some(mate_sequence) = find_mate_sequence(board, 15, prev_move) {
         // 15手詰みを探す
         println!("*** 詰み手順発見！ 初手: {:?} ***", mate_sequence[0]);
-        return Some(mate_sequence[0].clone());
+        return (
+            30000i16 - mate_sequence.len() as i16,
+            mate_sequence.get(0).map(|mv| *mv),
+        );
     }
 
     let shared_info = Arc::new(Mutex::new(SearchInfo::default()));
@@ -241,6 +327,7 @@ fn find_best_move(
         let mut tt_guard = tt_for_thread.lock().unwrap();
 
         let mut best_move_overall: Option<MoveBit> = None;
+        let mut result_score = 0;
 
         //反復深化ループ
         for depth_run in 0..=max_depth {
@@ -260,6 +347,7 @@ fn find_best_move(
                 &log_file,
                 prev_move,
             );
+            result_score = score;
 
             //結果をUIに通知
             {
@@ -280,7 +368,7 @@ fn find_best_move(
         }
 
         //最終的な最善手を返す
-        best_move_overall
+        (result_score, best_move_overall)
     });
 
     println!("探索開始...");
@@ -467,23 +555,58 @@ fn main() {
                     } {}
                 } else {
                     println!("思考中...");
-                    let search_depth = 5;
+                    let search_depth = 7;
 
                     let log_file_for_thread = Arc::clone(&log_file);
                     let tt_for_thread = Arc::clone(&tt);
-                    best_move = match find_best_move(
-                        &mut vidro,
-                        search_depth,
-                        tt_for_thread,
-                        log_file_for_thread,
-                        prev_move,
-                    ) {
-                        Some(mv) => mv,
-                        None => {
+
+                    tt.lock().unwrap().clear();
+
+                    let score;
+                    (score, best_move) = {
+                        let result = find_best_move(
+                            &mut vidro,
+                            search_depth,
+                            tt_for_thread,
+                            log_file_for_thread,
+                            prev_move,
+                        );
+                        if result.1.is_some() {
+                            (result.0, result.1.unwrap())
+                        } else {
                             println!("指せる手がありません。手番プレイヤーの負けです");
                             break;
                         }
                     };
+                    println!(
+                        "\nalphabeta 決定手: {} 評価値{}",
+                        best_move.to_string(),
+                        score
+                    );
+
+                    let log_file_for_thread = Arc::clone(&log_file);
+                    let tt_for_thread = Arc::clone(&tt);
+
+                    tt.lock().unwrap().clear();
+
+                    let score;
+                    (score, best_move) = {
+                        let result = mtd_f(
+                            &mut vidro,
+                            0,
+                            search_depth,
+                            tt_for_thread,
+                            log_file_for_thread,
+                            prev_move,
+                        );
+                        if result.1.is_some() {
+                            (result.0, result.1.unwrap())
+                        } else {
+                            println!("指せる手がありません。手番プレイヤーの負けです");
+                            break;
+                        }
+                    };
+                    println!("\nmtd-f 決定手: {} 評価値{}", best_move.to_string(), score);
                 }
             }
             println!("\n決定手: {}", best_move.to_string());
