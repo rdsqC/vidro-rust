@@ -228,7 +228,7 @@ fn mtd_f(
 ) -> (i16, Option<MoveBit>) {
     //なくてもいい
     if let Some(mate_sequence) = find_mate_sequence(board, 9, prev_move) {
-        // 15手詰みを探す
+        // 9手詰みを探す
         println!("*** 詰み手順発見！ 初手: {:?} ***", mate_sequence[0]);
         return (
             30000i16 - mate_sequence.len() as i16,
@@ -242,38 +242,43 @@ fn mtd_f(
     let mut vidro_for_search = board.clone();
 
     let search_thread = thread::spawn(move || {
-        let mut tt_guard = tt_for_thread.lock().unwrap();
+        let mut prev_socre = f;
         let mut sequence: Vec<MoveBit> = Vec::new();
-        let mut g = f;
-        let mut upper_bound = i16::MAX;
-        let mut lower_bound = i16::MIN;
-        while lower_bound < upper_bound {
-            let beta: i16;
-            if g == lower_bound {
-                beta = g + 1;
-            } else {
-                beta = g;
+
+        for depth_level in 1..=depth {
+            let mut tt_guard = tt_for_thread.lock().unwrap();
+            let mut g = prev_socre;
+            let mut upper_bound = i16::MAX;
+            let mut lower_bound = i16::MIN;
+            while lower_bound < upper_bound {
+                let beta: i16;
+                if g == lower_bound {
+                    beta = g + 1;
+                } else {
+                    beta = g;
+                }
+                let mut route = Vec::new();
+                (g, sequence) = alphabeta(
+                    &mut vidro_for_search,
+                    depth_level,
+                    beta - 1,
+                    beta,
+                    &mut tt_guard,
+                    &mut route,
+                    true,
+                    shared_info.clone(),
+                    &log_file,
+                    prev_move,
+                );
+                if g < beta {
+                    upper_bound = g;
+                } else {
+                    lower_bound = g;
+                }
             }
-            let mut route = Vec::new();
-            (g, sequence) = alphabeta(
-                &mut vidro_for_search,
-                depth,
-                beta - 1,
-                beta,
-                &mut tt_guard,
-                &mut route,
-                true,
-                shared_info.clone(),
-                &log_file,
-                prev_move,
-            );
-            if g < beta {
-                upper_bound = g;
-            } else {
-                lower_bound = g;
-            }
+            prev_socre = g;
         }
-        (g, sequence.get(0).map(|mv| *mv))
+        (prev_socre, sequence.get(0).map(|mv| *mv))
     });
 
     println!("探索開始...");
@@ -553,8 +558,8 @@ fn main() {
                 use rand::seq::SliceRandom;
                 best_move = (*legal_moves.choose(&mut rand::thread_rng()).unwrap()).clone();
             } else {
-                let is_turn_humen = vidro.turn == 1;
-                // let is_turn_humen = false;
+                // let is_turn_humen = vidro.turn == 1;
+                let is_turn_humen = false;
                 if is_turn_humen {
                     println!("手を選択");
                     let legal_moves = vidro.generate_legal_move(prev_move);
@@ -565,7 +570,7 @@ fn main() {
                     } {}
                 } else {
                     println!("思考中...");
-                    let search_depth = 7;
+                    let search_depth = 9;
 
                     // let log_file_for_thread = Arc::clone(&log_file);
                     // let tt_for_thread = Arc::clone(&tt);
@@ -597,7 +602,7 @@ fn main() {
                     let log_file_for_thread = Arc::clone(&log_file);
                     let tt_for_thread = Arc::clone(&tt);
 
-                    tt.lock().unwrap().clear();
+                    // tt.lock().unwrap().clear();
 
                     let score;
                     (score, best_move) = {
