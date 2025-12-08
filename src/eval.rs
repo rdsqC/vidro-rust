@@ -1,9 +1,6 @@
 use super::bitboard::{Bitboard, FIELD_BOD, FIELD_BOD_HEIGHT, FIELD_BOD_WIDTH, MoveBit};
-use super::bitboard_console::BitboardConsole;
 use super::checkmate_search::generate_threat_moves;
 use super::eval_value::{Eval, EvalValue};
-use Vec;
-use std::{io, usize};
 
 pub fn static_evaluation(vidro: &mut Bitboard, prev_move: Option<MoveBit>) -> i16 {
     let threats = evaluate_threats(&vidro);
@@ -18,7 +15,7 @@ pub fn static_evaluation(vidro: &mut Bitboard, prev_move: Option<MoveBit>) -> i1
     // 相手の脅威の数も計算し、評価値から引くとなお良い
     vidro.turn_change();
     let opponent_threats = generate_threat_moves(vidro, prev_move).len() as i16;
-    let opponent_threat_score = opponent_threats * 25;
+    let opponent_threat_score = opponent_threats * 150;
     vidro.turn_change(); // ★手番を必ず元に戻す
 
     threats + have_piece * 100 + position + threat_score - opponent_threat_score
