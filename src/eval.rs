@@ -146,12 +146,12 @@ const LEARNING_RATE: f32 = 0.1;
 const LAMBDA: f32 = 0.0001; //正則化係数
 
 pub struct AiModel {
-    weights: Vec<f32>,
+    pub weights: Vec<f32>,
 }
 
 pub struct GameResult {
-    history: Vec<BoardSnapshot>,
-    score: f32, // 1.0: 先手勝ち, 0.0 先手負け
+    pub history: Vec<BoardSnapshot>,
+    pub score: f32, // 1.0: 先手勝ち, 0.0 先手負け
 }
 
 impl AiModel {

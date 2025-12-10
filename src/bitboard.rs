@@ -12,8 +12,8 @@ pub struct Bitboard {
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct MoveBit {
-    idx: u8,
-    angle_idx: u8, //8以上のときはset
+    pub idx: u8,
+    pub angle_idx: u8, //8以上のときはset
 }
 
 impl MoveBit {
