@@ -60,7 +60,7 @@ pub fn alphabeta(
     // process.update(depth, board, tt.len());
     let mut best_pv = Vec::new();
     // canonical_board(&mut canonical_board_data);
-    let hash = board.to_small_bod();
+    let hash = board.to_compression_bod();
     //千日手判定
     if route.contains(&hash) {
         return (DRAW_SCORE, Vec::new()); //引き分け評価
@@ -91,7 +91,7 @@ pub fn alphabeta(
         //詰み探索を実行
         let tsumi_found = if tsumi_result.is_some() { 1 } else { 0 };
 
-        let log_line = format!("{},{}", tsumi_found, board.to_small_bod());
+        let log_line = format!("{},{}", tsumi_found, board.to_compression_bod());
 
         //ファイル出力
         // writeln!(log_file.lock().unwrap(), "{}", log_line).expect("ログを書き込めませんでした");
@@ -198,7 +198,7 @@ pub fn alphabeta(
     }
 
     if 29900 < best_score {
-        let log_line = format!("{},{}", 1, board.to_small_bod());
+        let log_line = format!("{},{}", 1, board.to_compression_bod());
         //ファイル出力
         // writeln!(log_file.lock().unwrap(), "{}", log_line).expect("ログを書き込めませんでした");
     }

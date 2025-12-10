@@ -1,5 +1,7 @@
-use crate::bitboard_console::BitboardConsole;
-use crate::eval_value::{Eval, EvalValue};
+use crate::{
+    eval_value::{Eval, EvalValue},
+    snapshot::BoardSnapshot,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Bitboard {
@@ -696,7 +698,7 @@ impl Bitboard {
 
         result
     }
-    pub fn to_small_bod(&self) -> u64 {
+    pub fn to_compression_bod(&self) -> u64 {
         use std::arch::x86_64::_pext_u64;
         let mut result = 0u64;
         let turn_player = ((-self.turn + 1) / 2) as usize;
@@ -708,5 +710,14 @@ impl Bitboard {
         }
         // println!("{:0>64b}", result);
         result
+    }
+    pub fn to_snapshot(&self) -> BoardSnapshot {
+        BoardSnapshot {
+            p1: self.player_bods[0],
+            p2: self.player_bods[0],
+            turn: self.turn,
+            p1_hand_piece: self.have_piece[0],
+            p2_hand_piece: self.have_piece[1],
+        }
     }
 }

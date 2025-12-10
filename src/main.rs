@@ -4,23 +4,18 @@ mod checkmate_search;
 mod eval;
 mod eval_value;
 mod search;
-use Vec;
+mod snapshot;
+mod snapshot_features;
 use bitboard::{Bitboard, MoveBit};
 use bitboard_console::BitboardConsole;
-use checkmate_search::{find_mate, find_mate_in_one_move, find_mate_sequence};
-use eval::static_evaluation;
 use eval_value::{Eval, EvalValue};
 use lru::LruCache;
-use rand::seq::SliceRandom;
-use rand::thread_rng;
+use rand::seq::IndexedRandom;
 use search::mtd_f;
 use std::fs::{File, OpenOptions, metadata};
 use std::io::Write;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::{Duration, Instant};
-use std::{io, usize};
 
 fn main() {
     // let mut bit_vidro = Bitboard::new_initial();
@@ -123,8 +118,7 @@ fn main() {
                 if legal_moves.is_empty() {
                     break;
                 }
-                use rand::seq::SliceRandom;
-                best_move = (*legal_moves.choose(&mut rand::thread_rng()).unwrap()).clone();
+                best_move = (*legal_moves.choose(&mut rand::rng()).unwrap()).clone();
             } else {
                 // let is_turn_humen = vidro.turn == 1;
                 let is_turn_humen = false;

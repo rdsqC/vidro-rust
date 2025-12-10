@@ -1,3 +1,5 @@
+use rand::{Rng, distr::Uniform};
+
 use super::bitboard::{Bitboard, FIELD_BOD, FIELD_BOD_HEIGHT, FIELD_BOD_WIDTH, MoveBit};
 use super::checkmate_search::generate_threat_moves;
 use super::eval_value::{Eval, EvalValue};
@@ -134,4 +136,82 @@ fn evaluate_reach(vidro: &mut Bitboard, prev_move: Option<MoveBit>) -> i16 {
     }
     vidro.turn_change();
     return 0;
+}
+
+use crate::snapshot::BoardSnapshot;
+use crate::snapshot_features::{BitIter, BoardSnapshotFeatures, NUM_FEATURES};
+use rayon::prelude::*;
+
+const LEARNING_RATE: f32 = 0.1;
+const LAMBDA: f32 = 0.0001; //正則化係数
+
+pub struct AiModel {
+    weights: Vec<f32>,
+}
+
+pub struct GameResult {
+    history: Vec<BoardSnapshot>,
+    score: f32, // 1.0: 先手勝ち, 0.0 先手負け
+}
+
+impl AiModel {
+    pub fn rand_new() -> Self {
+        Self {
+            weights: (0..NUM_FEATURES)
+                .map(|_| rand::random_range(-0.1f32..=0.1f32))
+                .collect::<Vec<f32>>(),
+        }
+    }
+    fn eval_score(&self, features_iter: impl Iterator<Item = usize>) -> f32 {
+        features_iter.map(|n| self.weights[n]).sum()
+    }
+    fn eval_score_from_vec(&self, features: &[usize]) -> f32 {
+        features.iter().map(|&n| self.weights[n]).sum()
+    }
+    pub fn update_from_batch(&mut self, batch: &[GameResult]) {
+        let batch_size = batch.len() as f32;
+        let total_gradients: Vec<f32> = batch
+            .par_iter()
+            .fold(
+                || vec![0.0f32; NUM_FEATURES],
+                |mut local_grads, game| {
+                    self.accumulate_game_gradient(&mut local_grads, game);
+                    local_grads
+                },
+            )
+            .reduce(
+                || vec![0.0; NUM_FEATURES],
+                |mut a, b| {
+                    a.iter_mut()
+                        .zip(b.into_iter())
+                        .for_each(|(item1, item2)| *item1 += item2);
+                    a
+                },
+            );
+
+        let eta = LEARNING_RATE / batch_size;
+        for i in 0..NUM_FEATURES {
+            let gradient = total_gradients[i];
+            let regularization = LAMBDA * self.weights[i];
+            self.weights[i] += eta * (gradient - regularization); //正則化
+        }
+    }
+    fn accumulate_game_gradient(&self, accumulator: &mut Vec<f32>, game: &GameResult) {
+        let target = game.score;
+        for snapshot in game.history.iter() {
+            let z: f32 = self.eval_score(snapshot.iter_feature_indices());
+            let p = sigmoid(z);
+            //誤差
+            let error = target - p;
+
+            //勾配加算
+            snapshot
+                .iter_feature_indices()
+                .for_each(|idx| accumulator[idx] += error);
+        }
+    }
+}
+
+fn sigmoid(x: f32) -> f32 {
+    1.0 / (1.0 + (-x).exp())
 }
