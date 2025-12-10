@@ -1,10 +1,49 @@
 use crate::{
     bitboard::{Bitboard, MoveBit},
-    snapshot,
+    eval::GameResult,
+    snapshot::BoardSnapshot,
     snapshot_features::BoardSnapshotFeatures,
 };
 use rand::distr::{Distribution, weighted::WeightedIndex};
 use rayon::prelude::*;
+
+pub fn generate_self_play_data(current_weights: &[f32], batch_size: usize) -> Vec<GameResult> {
+    (0..batch_size)
+        .into_par_iter()
+        .map(|_| {
+            let mut board = Bitboard::new_initial();
+            let mut history: Vec<BoardSnapshot> = Vec::new();
+            let mut prev_move: Option<MoveBit> = None;
+
+            let mut turn_count = 0;
+            while board.game_over() {
+                history.push(board.to_snapshot(prev_move));
+
+                let temp = if turn_count < 20 { 1.5 } else { 0.5 };
+
+                if let Some(mv) = select_move_softmax(&board, current_weights, temp, prev_move) {
+                    board.apply_force(mv);
+                    prev_move = Some(mv);
+                } else {
+                    break;
+                }
+
+                turn_count += 1;
+            }
+
+            let score = match board.win_turn() {
+                1 => 1.0,
+                -1 => 0.0,
+                0 => 0.5,
+                _ => {
+                    panic!()
+                }
+            };
+
+            GameResult { history, score }
+        })
+        .collect()
+}
 
 fn select_move_softmax(
     board: &Bitboard,
