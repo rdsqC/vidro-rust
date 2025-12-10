@@ -696,7 +696,7 @@ impl Bitboard {
 
         result
     }
-    pub fn to_small_bod(&self) -> u64 {
+    pub fn to_compression_bod(&self) -> u64 {
         use std::arch::x86_64::_pext_u64;
         let mut result = 0u64;
         let turn_player = ((-self.turn + 1) / 2) as usize;
