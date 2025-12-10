@@ -158,7 +158,7 @@ where
             false,
             shared_info.clone(),
             Some(mv),
-            &evaluate,
+            evaluate,
         );
         score = -score;
         board.undo_force(mv); //Bitboardに戻す

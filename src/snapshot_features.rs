@@ -1,9 +1,9 @@
-use crate::bitboard::{FIELD_BOD, MoveBit};
+use crate::bitboard::{BITBOD_WIDTH, FIELD_BOD, FIELD_BOD_WIDTH, MoveBit};
 use crate::snapshot::BoardSnapshot;
 use std::arch::x86_64::_pext_u64;
 
 const NUM_VALID_SQUARES: usize = FIELD_BOD.count_ones() as usize;
-pub const NUM_FEATURES: usize = 288;
+pub const NUM_FEATURES: usize = 289;
 
 #[derive(Clone, Copy)]
 pub struct BitIter(u64);
@@ -59,13 +59,15 @@ impl BoardSnapshotFeatures for BoardSnapshot {
         let prev_move_iter = self
             .prev_move
             .map(|mv| {
+                let mv_idx = mv.idx as usize % BITBOD_WIDTH as usize
+                    + mv.idx as usize / BITBOD_WIDTH as usize * FIELD_BOD_WIDTH as usize;
                 if mv.angle_idx < 8 {
-                    prev_move_offset + mv.idx as usize
-                } else {
                     prev_move_offset
                         + NUM_VALID_SQUARES
-                        + mv.idx as usize
+                        + mv_idx as usize
                         + NUM_VALID_SQUARES * mv.angle_idx as usize
+                } else {
+                    prev_move_offset + mv_idx as usize
                 }
             })
             .into_iter();
