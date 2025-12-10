@@ -3,7 +3,7 @@ use crate::snapshot::BoardSnapshot;
 use std::arch::x86_64::_pext_u64;
 
 const NUM_VALID_SQUARES: usize = FIELD_BOD.count_ones() as usize;
-pub const NUM_FEATURES: usize = 54;
+pub const NUM_FEATURES: usize = 64;
 
 #[derive(Clone, Copy)]
 pub struct BitIter(u64);
