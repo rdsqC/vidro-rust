@@ -55,7 +55,6 @@ pub fn alphabeta<F>(
     // process: &mut Progress,
     is_root: bool, // ★自分がルートノード（探索の起点）かを知るためのフラグ
     shared_info: Arc<Mutex<SearchInfo>>, // ★情報共有のための構造体
-    log_file: &Arc<Mutex<File>>,
     prev_move: Option<MoveBit>,
     evaluate: &F,
 ) -> (i16, Vec<MoveBit>)
@@ -158,7 +157,6 @@ where
             // process,
             false,
             shared_info.clone(),
-            log_file,
             Some(mv),
             &evaluate,
         );
@@ -218,7 +216,6 @@ pub fn mtd_f<F>(
     f: i16,
     depth: usize,
     tt: Arc<Mutex<LruCache<u64, TTEntry>>>,
-    log_file: Arc<Mutex<File>>,
     prev_move: Option<MoveBit>,
     evaluate: &F,
 ) -> (i16, Option<MoveBit>)
@@ -257,7 +254,6 @@ where
                         &mut route,
                         true,
                         shared_info.clone(),
-                        &log_file,
                         prev_move,
                         evaluate,
                     );
@@ -306,7 +302,6 @@ fn find_best_move<F>(
     board: &mut Bitboard,
     max_depth: usize,
     tt: Arc<Mutex<LruCache<u64, TTEntry>>>,
-    log_file: Arc<Mutex<File>>,
     prev_move: Option<MoveBit>,
     evaluate: &F,
 ) -> (i16, Option<MoveBit>)
@@ -341,7 +336,6 @@ where
                     // &mut process,
                     true,
                     shared_info.clone(),
-                    &log_file,
                     prev_move,
                     evaluate,
                 );

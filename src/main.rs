@@ -162,7 +162,6 @@ fn main() {
                     //     score
                     // );
 
-                    let log_file_for_thread = Arc::clone(&log_file);
                     let tt_for_thread = Arc::clone(&tt);
 
                     // tt.lock().unwrap().clear();
@@ -174,7 +173,6 @@ fn main() {
                             0,
                             search_depth,
                             tt_for_thread,
-                            log_file_for_thread,
                             prev_move,
                         );
                         if result.1.is_some() {
