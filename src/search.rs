@@ -307,16 +307,6 @@ fn find_best_move(
     log_file: Arc<Mutex<File>>,
     prev_move: Option<MoveBit>,
 ) -> (i16, Option<MoveBit>) {
-    //なくてもいい
-    if let Some(mate_sequence) = find_mate_sequence(board, 9, prev_move) {
-        // 15手詰みを探す
-        println!("*** 詰み手順発見！ 初手: {:?} ***", mate_sequence[0]);
-        return (
-            30000i16 - mate_sequence.len() as i16,
-            mate_sequence.get(0).map(|mv| *mv),
-        );
-    }
-
     let shared_info = Arc::new(Mutex::new(SearchInfo::default()));
     let info_clone_for_ui = shared_info.clone();
 
