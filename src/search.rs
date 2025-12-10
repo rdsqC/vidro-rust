@@ -3,6 +3,7 @@ use crate::bitboard_console::BitboardConsole;
 use crate::checkmate_search::{find_mate, find_mate_in_one_move, find_mate_sequence};
 use crate::eval::static_evaluation;
 use crate::eval_value::{Eval, EvalValue};
+use crate::snapshot::BoardSnapshot;
 use Vec;
 use lru::LruCache;
 use std::fs::{File, OpenOptions, metadata};
@@ -44,7 +45,7 @@ pub struct TTEntry {
     best_move: MoveBit, // その局面で見つかった最善手
 }
 
-pub fn alphabeta(
+pub fn alphabeta<F>(
     board: &mut Bitboard,
     depth: usize,
     mut alpha: i16,
@@ -56,7 +57,11 @@ pub fn alphabeta(
     shared_info: Arc<Mutex<SearchInfo>>, // ★情報共有のための構造体
     log_file: &Arc<Mutex<File>>,
     prev_move: Option<MoveBit>,
-) -> (i16, Vec<MoveBit>) {
+    evaluate: &F,
+) -> (i16, Vec<MoveBit>)
+where
+    F: Fn(&BoardSnapshot) -> i16 + Sync,
+{
     // process.update(depth, board, tt.len());
     let mut best_pv = Vec::new();
     // canonical_board(&mut canonical_board_data);
@@ -87,7 +92,7 @@ pub fn alphabeta(
         route.pop();
         let tsumi_result = find_mate_sequence(board, 1, prev_move);
 
-        let static_score = evaluate_for_negamax(board, prev_move);
+        let static_score = evaluate(&board.to_snapshot(prev_move)) * board.turn as i16;
         //詰み探索を実行
         let tsumi_found = if tsumi_result.is_some() { 1 } else { 0 };
 
@@ -155,6 +160,7 @@ pub fn alphabeta(
             shared_info.clone(),
             log_file,
             Some(mv),
+            &evaluate,
         );
         score = -score;
         board.undo_force(mv); //Bitboardに戻す
@@ -207,191 +213,190 @@ pub fn alphabeta(
     (best_score, best_pv)
 }
 
-pub fn mtd_f(
+pub fn mtd_f<F>(
     board: &mut Bitboard,
     f: i16,
     depth: usize,
     tt: Arc<Mutex<LruCache<u64, TTEntry>>>,
     log_file: Arc<Mutex<File>>,
     prev_move: Option<MoveBit>,
-) -> (i16, Option<MoveBit>) {
-    //なくてもいい
-    if let Some(mate_sequence) = find_mate_sequence(board, 9, prev_move) {
-        // 9手詰みを探す
-        println!("*** 詰み手順発見！ 初手: {:?} ***", mate_sequence[0]);
-        return (
-            30000i16 - mate_sequence.len() as i16,
-            mate_sequence.get(0).map(|mv| *mv),
-        );
-    }
-
+    evaluate: &F,
+) -> (i16, Option<MoveBit>)
+where
+    F: Fn(&BoardSnapshot) -> i16 + Sync,
+{
     let shared_info = Arc::new(Mutex::new(SearchInfo::default()));
     let info_clone_for_ui = shared_info.clone();
     let tt_for_thread = Arc::clone(&tt);
     let mut vidro_for_search = board.clone();
 
-    let search_thread = thread::spawn(move || {
-        let mut prev_socre = f;
-        let mut sequence: Vec<MoveBit> = Vec::new();
+    std::thread::scope(|s| {
+        let search_thread = s.spawn(move || {
+            let mut prev_socre = f;
+            let mut sequence: Vec<MoveBit> = Vec::new();
 
-        for depth_level in 1..=depth {
-            let mut tt_guard = tt_for_thread.lock().unwrap();
-            let mut g = prev_socre;
-            let mut upper_bound = i16::MAX;
-            let mut lower_bound = i16::MIN;
-            while lower_bound < upper_bound {
-                let beta: i16;
-                if g == lower_bound {
-                    beta = g + 1;
-                } else {
-                    beta = g;
+            for depth_level in 1..=depth {
+                let mut tt_guard = tt_for_thread.lock().unwrap();
+                let mut g = prev_socre;
+                let mut upper_bound = i16::MAX;
+                let mut lower_bound = i16::MIN;
+                while lower_bound < upper_bound {
+                    let beta: i16;
+                    if g == lower_bound {
+                        beta = g + 1;
+                    } else {
+                        beta = g;
+                    }
+                    let mut route = Vec::new();
+                    (g, sequence) = alphabeta(
+                        &mut vidro_for_search,
+                        depth_level,
+                        beta - 1,
+                        beta,
+                        &mut tt_guard,
+                        &mut route,
+                        true,
+                        shared_info.clone(),
+                        &log_file,
+                        prev_move,
+                        evaluate,
+                    );
+                    if g < beta {
+                        upper_bound = g;
+                    } else {
+                        lower_bound = g;
+                    }
                 }
-                let mut route = Vec::new();
-                (g, sequence) = alphabeta(
-                    &mut vidro_for_search,
-                    depth_level,
-                    beta - 1,
-                    beta,
-                    &mut tt_guard,
-                    &mut route,
-                    true,
-                    shared_info.clone(),
-                    &log_file,
-                    prev_move,
-                );
-                if g < beta {
-                    upper_bound = g;
-                } else {
-                    lower_bound = g;
-                }
+                prev_socre = g;
             }
-            prev_socre = g;
+            (prev_socre, sequence.get(0).map(|mv| *mv))
+        });
+
+        println!("探索開始...");
+        loop {
+            thread::sleep(Duration::from_millis(200));
+            {
+                let info = info_clone_for_ui.lock().unwrap();
+                print!(
+                    "\rDepth: {:2}, Score: {:6}, Nodes: {:8}, PV: {:<50}",
+                    info.depth,
+                    info.score,
+                    info.nodes,
+                    info.pv
+                        .iter()
+                        .map(|m| m.to_string())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                );
+
+                // 標準出力をフラッシュして即時表示
+                use std::io::Write;
+                std::io::stdout().flush().unwrap();
+            }
+
+            if search_thread.is_finished() {
+                break;
+            }
         }
-        (prev_socre, sequence.get(0).map(|mv| *mv))
-    });
-
-    println!("探索開始...");
-    loop {
-        thread::sleep(Duration::from_millis(200));
-        {
-            let info = info_clone_for_ui.lock().unwrap();
-            print!(
-                "\rDepth: {:2}, Score: {:6}, Nodes: {:8}, PV: {:<50}",
-                info.depth,
-                info.score,
-                info.nodes,
-                info.pv
-                    .iter()
-                    .map(|m| m.to_string())
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            );
-
-            // 標準出力をフラッシュして即時表示
-            use std::io::Write;
-            std::io::stdout().flush().unwrap();
-        }
-
-        if search_thread.is_finished() {
-            break;
-        }
-    }
-
-    search_thread.join().unwrap()
+        search_thread.join().unwrap()
+    })
 }
 
-fn find_best_move(
+fn find_best_move<F>(
     board: &mut Bitboard,
     max_depth: usize,
     tt: Arc<Mutex<LruCache<u64, TTEntry>>>,
     log_file: Arc<Mutex<File>>,
     prev_move: Option<MoveBit>,
-) -> (i16, Option<MoveBit>) {
+    evaluate: &F,
+) -> (i16, Option<MoveBit>)
+where
+    F: Fn(&BoardSnapshot) -> i16 + Sync,
+{
     let shared_info = Arc::new(Mutex::new(SearchInfo::default()));
     let info_clone_for_ui = shared_info.clone();
-
-    let mut route: Vec<u64> = Vec::new();
-
-    let mut best_move: Option<MoveBit> = None;
 
     let tt_for_thread = Arc::clone(&tt);
     let mut vidro_for_search = board.clone();
 
-    let search_thread = thread::spawn(move || {
-        let mut tt_guard = tt_for_thread.lock().unwrap();
+    std::thread::scope(|s| {
+        let search_thread = s.spawn(move || {
+            let mut tt_guard = tt_for_thread.lock().unwrap();
 
-        let mut best_move_overall: Option<MoveBit> = None;
-        let mut result_score = 0;
+            let mut best_move_overall: Option<MoveBit> = None;
+            let mut result_score = 0;
 
-        //反復深化ループ
-        for depth_run in 0..=max_depth {
-            let mut route = Vec::new();
+            //反復深化ループ
+            for depth_run in 0..=max_depth {
+                let mut route = Vec::new();
 
-            //ルートノードで探索
-            let (score, pv_sequence) = alphabeta(
-                &mut vidro_for_search,
-                depth_run,
-                i16::MIN + 1,
-                i16::MAX,
-                &mut tt_guard,
-                &mut route,
-                // &mut process,
-                true,
-                shared_info.clone(),
-                &log_file,
-                prev_move,
-            );
-            result_score = score;
+                //ルートノードで探索
+                let (score, pv_sequence) = alphabeta(
+                    &mut vidro_for_search,
+                    depth_run,
+                    i16::MIN + 1,
+                    i16::MAX,
+                    &mut tt_guard,
+                    &mut route,
+                    // &mut process,
+                    true,
+                    shared_info.clone(),
+                    &log_file,
+                    prev_move,
+                    evaluate,
+                );
+                result_score = score;
 
-            //結果をUIに通知
+                //結果をUIに通知
+                {
+                    let mut info = shared_info.lock().unwrap();
+                    info.score = score;
+                    info.depth = depth_run;
+                    info.pv = pv_sequence.clone();
+                }
+
+                if !pv_sequence.is_empty() {
+                    best_move_overall = Some(pv_sequence[0].clone());
+                }
+
+                if score.abs() >= 29000 {
+                    //詰み発見
+                    break;
+                }
+            }
+
+            //最終的な最善手を返す
+            (result_score, best_move_overall)
+        });
+
+        println!("探索開始...");
+        loop {
+            thread::sleep(Duration::from_millis(200));
             {
-                let mut info = shared_info.lock().unwrap();
-                info.score = score;
-                info.depth = depth_run;
-                info.pv = pv_sequence.clone();
+                let info = info_clone_for_ui.lock().unwrap();
+                print!(
+                    "\rDepth: {:2}, Score: {:6}, Nodes: {:8}, PV: {:<50}",
+                    info.depth,
+                    info.score,
+                    info.nodes,
+                    info.pv
+                        .iter()
+                        .map(|m| m.to_string())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                );
+
+                // 標準出力をフラッシュして即時表示
+                use std::io::Write;
+                std::io::stdout().flush().unwrap();
             }
 
-            if !pv_sequence.is_empty() {
-                best_move_overall = Some(pv_sequence[0].clone());
-            }
-
-            if score.abs() >= 29000 {
-                //詰み発見
+            if search_thread.is_finished() {
                 break;
             }
         }
 
-        //最終的な最善手を返す
-        (result_score, best_move_overall)
-    });
-
-    println!("探索開始...");
-    loop {
-        thread::sleep(Duration::from_millis(200));
-        {
-            let info = info_clone_for_ui.lock().unwrap();
-            print!(
-                "\rDepth: {:2}, Score: {:6}, Nodes: {:8}, PV: {:<50}",
-                info.depth,
-                info.score,
-                info.nodes,
-                info.pv
-                    .iter()
-                    .map(|m| m.to_string())
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            );
-
-            // 標準出力をフラッシュして即時表示
-            use std::io::Write;
-            std::io::stdout().flush().unwrap();
-        }
-
-        if search_thread.is_finished() {
-            break;
-        }
-    }
-
-    //探索スレッドの終了を待って最善手を取得
-    search_thread.join().unwrap()
+        //探索スレッドの終了を待って最善手を取得
+        search_thread.join().unwrap()
+    })
 }
