@@ -4,7 +4,7 @@ mod checkmate_search;
 mod eval;
 mod eval_value;
 mod search;
-mod select_move_softmax;
+mod self_match;
 mod snapshot;
 mod snapshot_features;
 use bitboard::{Bitboard, MoveBit};
