@@ -4,6 +4,8 @@ mod checkmate_search;
 mod eval;
 mod eval_value;
 mod search;
+mod snapshot;
+mod snapshot_features;
 use Vec;
 use bitboard::{Bitboard, MoveBit};
 use bitboard_console::BitboardConsole;
