@@ -162,10 +162,10 @@ impl AiModel {
                 .collect::<Vec<f32>>(),
         }
     }
-    fn eval_score(&self, features_iter: impl Iterator<Item = usize>) -> f32 {
+    pub fn eval_score(&self, features_iter: impl Iterator<Item = usize>) -> f32 {
         features_iter.map(|n| self.weights[n]).sum()
     }
-    fn eval_score_from_vec(&self, features: &[usize]) -> f32 {
+    pub fn eval_score_from_vec(&self, features: &[usize]) -> f32 {
         features.iter().map(|&n| self.weights[n]).sum()
     }
     pub fn update_from_batch(&mut self, batch: &[GameResult]) {

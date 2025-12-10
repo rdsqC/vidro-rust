@@ -18,63 +18,43 @@ use std::io::Write;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 
+use crate::checkmate_search::generate_threat_moves;
+use crate::eval::AiModel;
+use crate::self_match::generate_self_play_data;
+use crate::snapshot::BoardSnapshot;
+use crate::snapshot_features::BoardSnapshotFeatures;
+
 fn main() {
-    // let mut bit_vidro = Bitboard::new_initial();
-    // println!("result: {}", eval_mon(&mut bit_vidro));
-    // return;
+    let mut ai_ctx = AiModel::rand_new();
 
-    // _play_vidro();
-    // return;
-    //
-    //テストの局面(詰み)
-    // vidro.set_ohajiki((0, 2)).unwrap();
-    // vidro.set_ohajiki((2, 0)).unwrap();
-    // vidro.set_ohajiki((2, 4)).unwrap();
-    // vidro.set_ohajiki((0, 0)).unwrap();
-    // vidro.set_ohajiki((0, 4)).unwrap();
-    // vidro.set_ohajiki((4, 0)).unwrap();
+    let batch_size = 100;
+    let epochs = 1000;
 
-    //問題の局面
-    // vidro.set_ohajiki((2, 2)).unwrap();
-    // vidro.set_ohajiki((0, 0)).unwrap();
-    // vidro.set_ohajiki((0, 4)).unwrap();
-    // vidro.set_ohajiki((2, 0)).unwrap();
-    // vidro.set_ohajiki((2, 4)).unwrap();
-    // vidro.set_ohajiki((1, 2)).unwrap();
-    // vidro.set_ohajiki((1, 0)).unwrap();
-    // vidro.set_ohajiki((4, 0)).unwrap();
-    // vidro.set_ohajiki((3, 0)).unwrap();
-    // vidro.set_ohajiki((4, 2)).unwrap();
+    println!(
+        "start learning\nepochs:{} batch_size:{}",
+        epochs, batch_size
+    );
 
-    // println!("{}", vidro._to_string());
+    for epoch in 0..epochs {
+        // 自己対局
+        let games = generate_self_play_data(&ai_ctx.weights, batch_size);
 
-    // vidro.set_ohajiki((0, 0)).unwrap();
-    // vidro.set_ohajiki((4, 4)).unwrap();
-    // vidro.set_ohajiki((0, 2)).unwrap();
-    // vidro.set_ohajiki((4, 2)).unwrap();
-    // vidro.set_ohajiki((2, 1)).unwrap();
-    // vidro.set_ohajiki((2, 3)).unwrap();
+        //重み更新
+        ai_ctx.update_from_batch(&games);
 
-    // println!("{:#?}", find_mate(&mut vidro, 9));
-    // println!("{:#?}", find_mate_sequence(&mut vidro, 9));
-
-    let path = "tsumi_log.csv";
-    let log_file_obj = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .expect("ログファイルを開けませんでしたMaintainers and contributors of this project");
-    let log_file = Arc::new(Mutex::new(log_file_obj));
-    // CSVのヘッダーを書き込む（プログラム起動時に一度だけ）
-
-    {
-        if let Ok(meta) = metadata(path) {
-            if meta.len() == 0 {
-                writeln!(log_file.lock().unwrap(), " tsumi_found, small_bod")
-                    .expect("ヘッダーを書き込めませんでした");
-            }
+        //ログ出力
+        if epoch % 10 == 0 {
+            let win_rate = games.iter().map(|g| g.score).sum::<f32>() / batch_size as f32;
+            println!("Epoch {}: 先手勝率: {:.3}", epoch, win_rate);
         }
     }
+
+    println!("学習完了");
+
+    let evaluate = |snapshot: &BoardSnapshot| {
+        let z = ai_ctx.eval_score(snapshot.iter_feature_indices());
+        ((z * 100.0) as i16).clamp(-29000, 29000)
+    };
 
     let tt = Arc::new(Mutex::new(LruCache::new(
         NonZeroUsize::new(100_000).unwrap(),
@@ -121,8 +101,7 @@ fn main() {
                 }
                 best_move = (*legal_moves.choose(&mut rand::rng()).unwrap()).clone();
             } else {
-                // let is_turn_humen = vidro.turn == 1;
-                let is_turn_humen = false;
+                let is_turn_humen = vidro.turn == 1;
                 if is_turn_humen {
                     println!("手を選択");
                     let legal_moves = vidro.generate_legal_move(prev_move);
@@ -133,7 +112,7 @@ fn main() {
                     } {}
                 } else {
                     println!("思考中...");
-                    let search_depth = 9;
+                    let search_depth = 5;
 
                     // let log_file_for_thread = Arc::clone(&log_file);
                     // let tt_for_thread = Arc::clone(&tt);
@@ -174,6 +153,7 @@ fn main() {
                             search_depth,
                             tt_for_thread,
                             prev_move,
+                            &evaluate,
                         );
                         if result.1.is_some() {
                             (result.0, result.1.unwrap())
