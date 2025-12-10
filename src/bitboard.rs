@@ -1,5 +1,7 @@
-use crate::bitboard_console::BitboardConsole;
-use crate::eval_value::{Eval, EvalValue};
+use crate::{
+    eval_value::{Eval, EvalValue},
+    snapshot::BoardSnapshot,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Bitboard {
@@ -708,5 +710,14 @@ impl Bitboard {
         }
         // println!("{:0>64b}", result);
         result
+    }
+    pub fn to_snapshot(&self) -> BoardSnapshot {
+        BoardSnapshot {
+            p1: self.player_bods[0],
+            p2: self.player_bods[0],
+            turn: self.turn,
+            p1_hand_piece: self.have_piece[0],
+            p2_hand_piece: self.have_piece[1],
+        }
     }
 }
