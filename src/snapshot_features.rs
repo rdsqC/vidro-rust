@@ -1,9 +1,44 @@
 use crate::bitboard::{BITBOD_WIDTH, FIELD_BOD, FIELD_BOD_WIDTH, MoveBit};
-use crate::snapshot::BoardSnapshot;
+use crate::snapshot::{self, BoardSnapshot};
 use std::arch::x86_64::_pext_u64;
 
+macro_rules! build_features {
+    ($snapshot: expr, [  $($feature_type:ty),* ]) => {
+        {
+            build_features!(@recurse, $snapshot, 0, $($feature_type),*)
+        }
+    };
+
+    (@recurse, $snapshot: expr, $current_offset: expr, $head: ty, $($rest:ty),+) => {
+        <$head as FeaatureGroup>::get_iter($snapshot, $current_offset)
+            .chain(
+                build_features!(
+                    @recurse,
+                    $snapshot,
+                    ($current_offset + <$head as FeatureGroup>::LEN),
+                    $tail,
+                )
+            )
+    };
+
+    (@recurse, $snapshot:expr, $current_offset:expr, $last:ty) => {
+        <$last as FeatureGroup>::get_iter($snapshot, $current_offset)
+    };
+}
+
+trait FeatureGroup {
+    const LEN: usize;
+
+    fn get_iter(snapshot: &BoardSnapshot, offset_set: usize) -> impl Iterator<Item = usize>;
+}
+
+macro_rules! count_total_featrues {
+    ($($featrue_type:ty),*) => {
+        0 $( + <$feature_type as FeatureGroup>::LEN )*
+    };
+}
+
 const NUM_VALID_SQUARES: usize = FIELD_BOD.count_ones() as usize;
-pub const NUM_FEATURES: usize = 289;
 
 #[derive(Clone, Copy)]
 pub struct BitIter(u64);
@@ -141,6 +176,8 @@ struct LineConfig {
     length: usize,
     offset: usize,
 }
+
+pub const NUM_FEATURES: usize = 289;
 
 impl BoardSnapshotFeatures for BoardSnapshot {
     fn iter_feature_indices(&self) -> impl Iterator<Item = usize> + '_ {
