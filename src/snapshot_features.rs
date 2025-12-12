@@ -10,13 +10,13 @@ macro_rules! build_features {
     };
 
     (@recurse, $snapshot: expr, $current_offset: expr, $head: ty, $($rest:ty),+) => {
-        <$head as FeaatureGroup>::get_iter($snapshot, $current_offset)
+        <$head as FeatureGroup>::get_iter($snapshot, $current_offset)
             .chain(
                 build_features!(
                     @recurse,
                     $snapshot,
                     ($current_offset + <$head as FeatureGroup>::LEN),
-                    $tail,
+                    $($rest),+
                 )
             )
     };
@@ -26,17 +26,44 @@ macro_rules! build_features {
     };
 }
 
+macro_rules! count_total_features {
+    ($($feature_type:ty),*) => {
+        0 $( + <$feature_type as FeatureGroup>::LEN )*
+    };
+}
+
 trait FeatureGroup {
     const LEN: usize;
 
     fn get_iter(snapshot: &BoardSnapshot, offset_set: usize) -> impl Iterator<Item = usize>;
 }
 
-macro_rules! count_total_featrues {
-    ($($featrue_type:ty),*) => {
-        0 $( + <$feature_type as FeatureGroup>::LEN )*
+macro_rules! define_ai_model {
+    (
+        target: $snapshot_type:ty,
+        features: [$($feature:ty),* $(,)?]
+     ) => {
+        pub const NUM_FEATURES: usize = count_total_features!($($feature),*);
+
+        impl BoardSnapshotFeatures for $snapshot_type {
+            fn iter_feature_indices(&self) -> impl Iterator<Item = usize> + '_ {
+                return build_features!(self, [$($feature),*]);
+            }
+        }
     };
 }
+
+define_ai_model!(
+    target: BoardSnapshot,
+    features: [
+        PPFeatures,
+        LineFeatures,
+        BiasFeatures,
+        TurnFeatures,
+        HandPieceFeatures,
+        PrevMoveFeatures,
+    ]
+);
 
 const NUM_VALID_SQUARES: usize = FIELD_BOD.count_ones() as usize;
 
@@ -323,67 +350,67 @@ impl FeatureGroup for PrevMoveFeatures {
     }
 }
 
-pub const NUM_FEATURES: usize = 289;
-
-impl BoardSnapshotFeatures for BoardSnapshot {
-    fn iter_feature_indices(&self) -> impl Iterator<Item = usize> + '_ {
-        let p1_packed = unsafe { _pext_u64(self.p1, FIELD_BOD) };
-        let p2_packed = unsafe { _pext_u64(self.p2, FIELD_BOD) };
-
-        let offset_pp = 0;
-        let p1_iter = BitIter(p1_packed);
-        let p2_iter = BitIter(p2_packed).map(|idx| idx + NUM_VALID_SQUARES);
-
-        let p1p2_iter = p1_iter.chain(p2_iter.clone());
-
-        // 0~324 len=325
-        let pp_iter = p1p2_iter.clone().flat_map(move |sq1| {
-            p1p2_iter
-                .clone()
-                .filter(move |&sq2| sq1 <= sq2)
-                .map(move |sq2| offset_pp + (sq1 * NUM_VALID_SQUARES + sq2))
-        });
-
-        let turn_offset = NUM_VALID_SQUARES * 2;
-        //0~0 len=1
-        let turn_iter = if self.turn == 0 {
-            Some(turn_offset).into_iter()
-        } else {
-            None.into_iter()
-        };
-
-        //bias_iter0~0 len=1
-        let bias_iter = Some(turn_offset + 1).into_iter();
-
-        let hand_piece_offset = turn_offset + 2;
-
-        //bias_iter and hand_piece_iter 0~11 len=12
-        let hand_piece_iter = [
-            hand_piece_offset + self.p1_hand_piece as usize,
-            hand_piece_offset + 6 + self.p2_hand_piece as usize,
-        ]
-        .into_iter();
-
-        let prev_move_offset = hand_piece_offset + 12;
-        //Set 0 ~ 24, Flick(Shoot) 25 ~ 224 len=225
-        let prev_move_iter = self
-            .prev_move
-            .map(|mv| {
-                if mv.angle_idx < 8 {
-                    prev_move_offset
-                        + NUM_VALID_SQUARES
-                        + mv.field_idx() as usize
-                        + NUM_VALID_SQUARES * mv.angle_idx as usize
-                } else {
-                    prev_move_offset + mv.field_idx() as usize
-                }
-            })
-            .into_iter();
-
-        pp_iter
-            .chain(turn_iter)
-            .chain(bias_iter)
-            .chain(hand_piece_iter)
-            .chain(prev_move_iter)
-    }
-}
+// pub const NUM_FEATURES: usize = 289;
+//
+// impl BoardSnapshotFeatures for BoardSnapshot {
+//     fn iter_feature_indices(&self) -> impl Iterator<Item = usize> + '_ {
+//         let p1_packed = unsafe { _pext_u64(self.p1, FIELD_BOD) };
+//         let p2_packed = unsafe { _pext_u64(self.p2, FIELD_BOD) };
+//
+//         let offset_pp = 0;
+//         let p1_iter = BitIter(p1_packed);
+//         let p2_iter = BitIter(p2_packed).map(|idx| idx + NUM_VALID_SQUARES);
+//
+//         let p1p2_iter = p1_iter.chain(p2_iter.clone());
+//
+//         // 0~324 len=325
+//         let pp_iter = p1p2_iter.clone().flat_map(move |sq1| {
+//             p1p2_iter
+//                 .clone()
+//                 .filter(move |&sq2| sq1 <= sq2)
+//                 .map(move |sq2| offset_pp + (sq1 * NUM_VALID_SQUARES + sq2))
+//         });
+//
+//         let turn_offset = NUM_VALID_SQUARES * 2;
+//         //0~0 len=1
+//         let turn_iter = if self.turn == 0 {
+//             Some(turn_offset).into_iter()
+//         } else {
+//             None.into_iter()
+//         };
+//
+//         //bias_iter0~0 len=1
+//         let bias_iter = Some(turn_offset + 1).into_iter();
+//
+//         let hand_piece_offset = turn_offset + 2;
+//
+//         //bias_iter and hand_piece_iter 0~11 len=12
+//         let hand_piece_iter = [
+//             hand_piece_offset + self.p1_hand_piece as usize,
+//             hand_piece_offset + 6 + self.p2_hand_piece as usize,
+//         ]
+//         .into_iter();
+//
+//         let prev_move_offset = hand_piece_offset + 12;
+//         //Set 0 ~ 24, Flick(Shoot) 25 ~ 224 len=225
+//         let prev_move_iter = self
+//             .prev_move
+//             .map(|mv| {
+//                 if mv.angle_idx < 8 {
+//                     prev_move_offset
+//                         + NUM_VALID_SQUARES
+//                         + mv.field_idx() as usize
+//                         + NUM_VALID_SQUARES * mv.angle_idx as usize
+//                 } else {
+//                     prev_move_offset + mv.field_idx() as usize
+//                 }
+//             })
+//             .into_iter();
+//
+//         pp_iter
+//             .chain(turn_iter)
+//             .chain(bias_iter)
+//             .chain(hand_piece_iter)
+//             .chain(prev_move_iter)
+//     }
+// }
