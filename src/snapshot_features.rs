@@ -30,24 +30,34 @@ impl BoardSnapshotFeatures for BoardSnapshot {
         let p1_packed = unsafe { _pext_u64(self.p1, FIELD_BOD) };
         let p2_packed = unsafe { _pext_u64(self.p2, FIELD_BOD) };
 
-        // 0~49
+        let offset_pp = 0;
         let p1_iter = BitIter(p1_packed);
         let p2_iter = BitIter(p2_packed).map(|idx| idx + NUM_VALID_SQUARES);
 
+        let p1p2_iter = p1_iter.chain(p2_iter.clone());
+
+        // 0~324 len=325
+        let pp_iter = p1p2_iter.clone().flat_map(move |sq1| {
+            p1p2_iter
+                .clone()
+                .filter(move |&sq2| sq1 <= sq2)
+                .map(move |sq2| offset_pp + (sq1 * NUM_VALID_SQUARES + sq2))
+        });
+
         let turn_offset = NUM_VALID_SQUARES * 2;
-        //0~0
+        //0~0 len=1
         let turn_iter = if self.turn == 0 {
             Some(turn_offset).into_iter()
         } else {
             None.into_iter()
         };
 
-        //bias_iter0~0
+        //bias_iter0~0 len=1
         let bias_iter = Some(turn_offset + 1).into_iter();
 
         let hand_piece_offset = turn_offset + 2;
 
-        //bias_iter and hand_piece_iter 0~11
+        //bias_iter and hand_piece_iter 0~11 len=12
         let hand_piece_iter = [
             hand_piece_offset + self.p1_hand_piece as usize,
             hand_piece_offset + 6 + self.p2_hand_piece as usize,
@@ -55,25 +65,22 @@ impl BoardSnapshotFeatures for BoardSnapshot {
         .into_iter();
 
         let prev_move_offset = hand_piece_offset + 12;
-        //Set 0 ~ 24, Flick(Shoot) 25 ~ 224
+        //Set 0 ~ 24, Flick(Shoot) 25 ~ 224 len=225
         let prev_move_iter = self
             .prev_move
             .map(|mv| {
-                let mv_idx = mv.idx as usize % BITBOD_WIDTH as usize
-                    + mv.idx as usize / BITBOD_WIDTH as usize * FIELD_BOD_WIDTH as usize;
                 if mv.angle_idx < 8 {
                     prev_move_offset
                         + NUM_VALID_SQUARES
-                        + mv_idx as usize
+                        + mv.field_idx() as usize
                         + NUM_VALID_SQUARES * mv.angle_idx as usize
                 } else {
-                    prev_move_offset + mv_idx as usize
+                    prev_move_offset + mv.field_idx() as usize
                 }
             })
             .into_iter();
 
-        p1_iter
-            .chain(p2_iter)
+        pp_iter
             .chain(turn_iter)
             .chain(bias_iter)
             .chain(hand_piece_iter)

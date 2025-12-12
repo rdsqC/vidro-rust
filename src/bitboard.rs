@@ -48,6 +48,10 @@ impl MoveBit {
     pub fn from_idx(idx: u8, angle_idx: u8) -> Self {
         Self { idx, angle_idx }
     }
+    pub fn field_idx(&self) -> usize {
+        self.idx as usize / BITBOD_WIDTH as usize * FIELD_BOD_WIDTH as usize
+            + self.idx as usize % BITBOD_WIDTH as usize
+    }
 }
 
 pub const BITBOD_WIDTH: u64 = 9;
