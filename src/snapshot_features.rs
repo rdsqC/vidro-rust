@@ -25,6 +25,123 @@ pub trait BoardSnapshotFeatures {
     fn iter_feature_indices(&self) -> impl Iterator<Item = usize> + '_;
 }
 
+const ZERO_CONFIG: LineConfig = LineConfig {
+    mask: 0,
+    length: 0,
+    offset: 0,
+};
+
+pub const FEATURE_LINES: [LineConfig; 20] = {
+    let mut masks = [0u64; 20];
+
+    let mut vertical_line = 0u64;
+    let mut i = 0;
+    while i < 5 {
+        vertical_line |= 0b000001 << BITBOD_WIDTH * i;
+        i += 1;
+    }
+
+    let mut i = 0;
+    let mut sq_idx = 0;
+    while i < 5 {
+        masks[sq_idx] = 0b11111 << BITBOD_WIDTH * i as u64;
+        i += 1;
+        sq_idx += 1;
+    }
+
+    let mut i = 0;
+    while i < 5 {
+        masks[sq_idx] = vertical_line << i;
+        i += 1;
+        sq_idx += 1;
+    }
+
+    let right_diagonal_line = {
+        let mut masks = 0u64;
+        let mut count = 0;
+        while count < 5 {
+            masks |= 0b10000 << count * (BITBOD_WIDTH - 1);
+            count += 1;
+        }
+        masks
+    };
+    let mut i = 0;
+    while i < 2 {
+        masks[sq_idx] = FIELD_BOD & (right_diagonal_line >> (2 - i));
+        i += 1;
+        sq_idx += 1;
+    }
+    let mut i = 0;
+    while i < 3 {
+        masks[sq_idx] = FIELD_BOD & (right_diagonal_line << i);
+        i += 1;
+        sq_idx += 1;
+    }
+
+    let left_diagonal_line = {
+        let mut masks = 0u64;
+        let mut count = 0;
+        while count < 5 {
+            masks |= 0b00001 << count * (BITBOD_WIDTH + 1);
+            count += 1;
+        }
+        masks
+    };
+    let mut i = 0;
+    while i < 2 {
+        masks[sq_idx] = FIELD_BOD & (left_diagonal_line >> (2 - i));
+        i += 1;
+        sq_idx += 1;
+    }
+    let mut i = 0;
+    while i < 3 {
+        masks[sq_idx] = FIELD_BOD & (left_diagonal_line << i);
+        i += 1;
+        sq_idx += 1;
+    }
+
+    let mut i = 0;
+    while i < 20 {
+        let mut j = 0;
+        while j < 20 - 1 - i {
+            if masks[i].count_ones() > masks[j + 1].count_ones() {
+                let temp = masks[j];
+                masks[j] = masks[j + 1];
+                masks[j + 1] = temp;
+            }
+            j += 1;
+        }
+        i += 1;
+    }
+
+    let mut configs = [ZERO_CONFIG; 20];
+    let mut current_offset = 0;
+
+    let mut k = 0;
+    while k < 20 {
+        let m = masks[k];
+        let len = m.count_ones() as usize;
+        let num_features = 3usize.pow(len as u32);
+
+        configs[k] = LineConfig {
+            mask: m,
+            length: len,
+            offset: current_offset,
+        };
+
+        current_offset += num_features;
+        k += 1;
+    }
+
+    configs
+};
+
+struct LineConfig {
+    mask: u64,
+    length: usize,
+    offset: usize,
+}
+
 impl BoardSnapshotFeatures for BoardSnapshot {
     fn iter_feature_indices(&self) -> impl Iterator<Item = usize> + '_ {
         let p1_packed = unsafe { _pext_u64(self.p1, FIELD_BOD) };
