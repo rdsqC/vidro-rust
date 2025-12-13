@@ -34,8 +34,8 @@ fn main() {
 
     let mut ai_ctx = AiModel::rand_new();
 
-    let batch_size = 100;
-    let epochs = 10000;
+    let batch_size = 160;
+    let epochs = 2000;
 
     println!(
         "start learning\nepochs:{} batch_size:{}",
@@ -45,17 +45,22 @@ fn main() {
     pre_train_with_manual_eval(&mut ai_ctx, 1000000, 15);
 
     println!("start self match");
-    for epoch in 0..epochs {
+    for epoch in 1..=epochs {
         // 自己対局
-        let games = generate_self_play_data(RANDOM_MOVES_UNTIL, &ai_ctx.weights, batch_size);
+        let games = generate_self_play_data(RANDOM_MOVES_UNTIL, &ai_ctx, batch_size);
 
         //重み更新
         ai_ctx.update_from_batch(&games);
 
         //ログ出力
-        if epoch % 100 == 0 {
+        if epoch % 10 == 0 {
             let win_rate = games.iter().map(|g| g.score).sum::<f32>() / batch_size as f32;
-            println!("Epoch {}: 先手勝率: {:.3}", epoch, win_rate);
+            let ave_moves =
+                games.iter().map(|g| g.history.len() as f32).sum::<f32>() / games.len() as f32;
+            println!(
+                "Epoch {}: WhiteWinRate: {:.3} AveMoves:{:.3}",
+                epoch, win_rate, ave_moves
+            );
         }
     }
 
@@ -122,7 +127,7 @@ fn main() {
                     } {}
                 } else {
                     println!("思考中...");
-                    let search_depth = 9;
+                    let search_depth = 5;
 
                     // let log_file_for_thread = Arc::clone(&log_file);
                     // let tt_for_thread = Arc::clone(&tt);
