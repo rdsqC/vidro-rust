@@ -429,7 +429,7 @@ impl Bitboard {
         );
     }
     pub fn generate_legal_move(&self, prev_move: Option<MoveBit>) -> Vec<MoveBit> {
-        let mut result = Vec::new();
+        let mut result = Vec::with_capacity(40);
         let turn_player = ((-self.turn + 1) / 2) as usize;
 
         if self.have_piece[turn_player] > 0 {
@@ -718,7 +718,7 @@ impl Bitboard {
     pub fn to_snapshot(&self, prev_move: Option<MoveBit>) -> BoardSnapshot {
         BoardSnapshot {
             p1: self.player_bods[0],
-            p2: self.player_bods[0],
+            p2: self.player_bods[1],
             turn: self.turn,
             p1_hand_piece: self.have_piece[0],
             p2_hand_piece: self.have_piece[1],
