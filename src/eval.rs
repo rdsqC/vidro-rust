@@ -4,19 +4,19 @@ use super::bitboard::{Bitboard, FIELD_BOD, FIELD_BOD_HEIGHT, FIELD_BOD_WIDTH, Mo
 use super::checkmate_search::generate_threat_moves;
 use super::eval_value::{Eval, EvalValue};
 
-pub fn static_evaluation(vidro: &mut Bitboard, prev_move: Option<MoveBit>) -> i16 {
+pub fn static_evaluation(vidro: &mut Bitboard, prev_hash: Option<u64>) -> i16 {
     let threats = evaluate_threats(&vidro);
     let have_piece = evaluate_have_piece(&vidro);
     let position = evaluate_position(&vidro);
-    let reach = evaluate_reach(vidro, prev_move);
+    let reach = evaluate_reach(vidro, prev_hash);
 
     // 自分の「詰めろ」になる手の数が多いほど、局面は有利
-    let my_threats = generate_threat_moves(vidro, prev_move).len() as i16;
+    let my_threats = generate_threat_moves(vidro, prev_hash).len() as i16;
     let threat_score = my_threats * 25; // 例：1つの脅威手を25点と評価
 
     // 相手の脅威の数も計算し、評価値から引くとなお良い
     vidro.turn_change();
-    let opponent_threats = generate_threat_moves(vidro, prev_move).len() as i16;
+    let opponent_threats = generate_threat_moves(vidro, prev_hash).len() as i16;
     let opponent_threat_score = opponent_threats * 150;
     vidro.turn_change(); // ★手番を必ず元に戻す
 
@@ -119,20 +119,26 @@ fn evaluate_threats(vidro: &Bitboard) -> i16 {
     total_score
 }
 
-fn evaluate_reach(vidro: &mut Bitboard, prev_move: Option<MoveBit>) -> i16 {
+fn evaluate_reach(vidro: &mut Bitboard, prev_hash: Option<u64>) -> i16 {
     vidro.turn_change(); //意図的に手番を書き換え2手差しさせたときに勝利することがあるかを調べる
-    let moves = vidro.generate_legal_move(prev_move);
+    let moves = vidro.generate_legal_move();
     let turn = vidro.turn;
     for &mv in &moves {
-        vidro.apply_force(mv);
-        if let EvalValue::Win(value) = vidro.win_eval().value {
-            if value as i8 == turn {
+        match vidro.apply_force_with_check_illegal_move(mv, prev_hash) {
+            Ok(()) => {
+                if let EvalValue::Win(value) = vidro.win_eval().value {
+                    if value as i8 == turn {
+                        vidro.undo_force(mv);
+                        vidro.turn_change();
+                        return value as i16
+                            * (10 - vidro.have_piece[0] - vidro.have_piece[1]) as i16
+                            * 15;
+                    }
+                }
                 vidro.undo_force(mv);
-                vidro.turn_change();
-                return value as i16 * (10 - vidro.have_piece[0] - vidro.have_piece[1]) as i16 * 15;
             }
+            Err(()) => {}
         }
-        vidro.undo_force(mv);
     }
     vidro.turn_change();
     return 0;

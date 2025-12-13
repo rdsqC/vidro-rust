@@ -125,7 +125,28 @@ impl Bitboard {
     pub fn turn_change(&mut self) {
         self.turn = -self.turn;
     }
-    pub fn apply_force(&mut self, mv: MoveBit) {
+
+    //千日手の場合はtrue, そうでない手をfalseと返す
+    pub fn check_illegal_move(&mut self, mv: MoveBit, prev_hash: Option<u64>) -> bool {
+        self.apply_force(mv);
+        let is_illegal = prev_hash.is_some_and(|prev| self.to_compression_bod() == prev);
+        self.undo_force(mv);
+        is_illegal
+    }
+    pub fn apply_force_with_check_illegal_move(
+        &mut self,
+        mv: MoveBit,
+        prev_hash: Option<u64>,
+    ) -> Result<(), ()> {
+        self.apply_force(mv);
+        if prev_hash.is_some_and(|prev| self.to_compression_bod() == prev) {
+            self.undo_force(mv);
+            Err(())
+        } else {
+            Ok(())
+        }
+    }
+    fn apply_force(&mut self, mv: MoveBit) {
         if mv.angle_idx < 8 {
             self.flick_force(mv);
         } else {
@@ -428,7 +449,7 @@ impl Bitboard {
             "target_bit is protrude beyand piece_bod"
         );
     }
-    pub fn generate_legal_move(&self, prev_move: Option<MoveBit>) -> Vec<MoveBit> {
+    pub fn generate_legal_move(&self) -> Vec<MoveBit> {
         let mut result = Vec::with_capacity(40);
         let turn_player = ((-self.turn + 1) / 2) as usize;
 
@@ -451,14 +472,8 @@ impl Bitboard {
             }
         }
         //flickの合法手を集める
-        let (prev, is_root) = if let Some(mv) = prev_move {
-            (mv, false)
-        } else {
-            (MoveBit::new(0, 0, 0), true)
-        };
-        let prev_angle = ANGLE[prev.angle_idx as usize % 4] as u8;
+        //千日手除外の処理は探索に任せる
         let blank: u64 = FIELD_BOD & !(self.player_bods[0] | self.player_bods[1]); //空白マス
-        let is_prev_left_direction = prev.angle_idx < 4;
         for angle_idx in 0..ANGLE.len() as u8 {
             let angle = ANGLE[angle_idx as usize];
 
@@ -483,34 +498,14 @@ impl Bitboard {
             while can_flick_bod1 != 0 {
                 let idx = can_flick_bod1.trailing_zeros() as u8;
 
-                let is_repetition_of_moves = {
-                    let difference_of_idx = idx.abs_diff(prev.idx);
-                    !is_prev_left_direction
-                        && prev.angle_idx % 4 == angle_idx
-                        && difference_of_idx % prev_angle == 0
-                        && difference_of_idx / prev_angle <= 5
-                        && !is_root
-                };
-                if !is_repetition_of_moves {
-                    result.push(MoveBit::from_idx(idx, angle_idx));
-                }
+                result.push(MoveBit::from_idx(idx, angle_idx));
                 can_flick_bod1 &= can_flick_bod1 - 1;
             }
 
             while can_flick_bod2 != 0 {
                 let idx = can_flick_bod2.trailing_zeros() as u8;
 
-                let is_repetition_of_moves = {
-                    let difference_of_idx = idx.abs_diff(prev.idx);
-                    is_prev_left_direction
-                        && prev.angle_idx % 4 == angle_idx
-                        && difference_of_idx % prev_angle == 0
-                        && difference_of_idx / prev_angle <= 5
-                        && !is_root
-                };
-                if !is_repetition_of_moves {
-                    result.push(MoveBit::from_idx(idx, angle_idx + 4));
-                }
+                result.push(MoveBit::from_idx(idx, angle_idx + 4));
                 can_flick_bod2 &= can_flick_bod2 - 1;
             }
         }
@@ -715,14 +710,14 @@ impl Bitboard {
         // println!("{:0>64b}", result);
         result
     }
-    pub fn to_snapshot(&self, prev_move: Option<MoveBit>) -> BoardSnapshot {
+    pub fn to_snapshot(&self, prev_hash: Option<u64>) -> BoardSnapshot {
         BoardSnapshot {
             p1: self.player_bods[0],
             p2: self.player_bods[1],
             turn: self.turn,
             p1_hand_piece: self.have_piece[0],
             p2_hand_piece: self.have_piece[1],
-            prev_move,
+            prev_hash,
         }
     }
 }

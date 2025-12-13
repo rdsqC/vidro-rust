@@ -21,14 +21,14 @@ pub fn generate_self_play_data(
     (0..batch_size)
         .into_par_iter()
         .map(|_| {
-            let (mut board, mut prev_move) = random_state_generator(random_moves_until);
+            let (mut board, mut prev_hash) = random_state_generator(random_moves_until);
             let mut history: Vec<BoardSnapshot> = Vec::with_capacity(20);
 
             let mut seen_state: HashSet<u64> = HashSet::new();
 
             let mut turn_count = 0;
             while !board.game_over() {
-                history.push(board.to_snapshot(prev_move));
+                history.push(board.to_snapshot(prev_hash));
 
                 let state_hash = board.to_compression_bod();
                 if seen_state.contains(&state_hash) {
@@ -38,9 +38,14 @@ pub fn generate_self_play_data(
                 seen_state.insert(state_hash);
 
                 let temp = if turn_count < 5 { 1.5 } else { 0.5 };
-                if let Some(mv) = select_move_softmax(&board, ai_model, temp, prev_move) {
-                    board.apply_force(mv);
-                    prev_move = Some(mv);
+                if let Some(mv) = select_move_softmax(&board, ai_model, temp, prev_hash) {
+                    prev_hash = Some(board.to_compression_bod());
+                    if board
+                        .apply_force_with_check_illegal_move(mv, prev_hash)
+                        .is_err()
+                    {
+                        panic!("AiModel must not selected illegal move");
+                    }
                 } else {
                     break;
                 }
@@ -68,9 +73,10 @@ fn select_move_softmax(
     board: &Bitboard,
     ai_model: &AiModel,
     temperature: f32,
-    prev_move: Option<MoveBit>,
+    prev_hash: Option<u64>,
 ) -> Option<MoveBit> {
-    let legal_moves = board.generate_legal_move(prev_move);
+    let hash = board.to_compression_bod();
+    let legal_moves = board.generate_legal_move();
     if legal_moves.is_empty() {
         return None;
     }
@@ -79,14 +85,19 @@ fn select_move_softmax(
         .iter()
         .map(|&mv| {
             let mut next_board = board.clone();
-            next_board.apply_force(mv);
+            if next_board
+                .apply_force_with_check_illegal_move(mv, prev_hash)
+                .is_err()
+            {
+                return f32::NEG_INFINITY;
+            }
             let z: f32 = -search(
                 &mut next_board,
                 ai_model,
                 3,
                 f32::NEG_INFINITY,
                 f32::INFINITY,
-                prev_move,
+                Some(hash),
             ); //常に先手の勝率を予測しているため反転させる
             z
         })
@@ -111,27 +122,40 @@ fn search(
     depth: usize,
     mut alpha: f32,
     beta: f32,
-    prev_move: Option<MoveBit>,
+    prev_hash: Option<u64>,
 ) -> f32 {
     if board.game_over() {
         return 30000.0 * board.win_turn() as f32 * board.turn as f32;
     }
     if depth == 0 {
-        let score = ai_model.eval_score(board.to_snapshot(prev_move).iter_feature_indices())
+        let score = ai_model.eval_score(board.to_snapshot(prev_hash).iter_feature_indices())
             * board.turn as f32;
         return score;
     }
 
-    let moves = board.generate_legal_move(prev_move);
+    let moves = board.generate_legal_move();
     if moves.is_empty() {
-        return ai_model.eval_score(board.to_snapshot(prev_move).iter_feature_indices())
+        return ai_model.eval_score(board.to_snapshot(prev_hash).iter_feature_indices())
             * board.turn as f32;
     }
 
     let mut max_score = f32::NEG_INFINITY;
     for mv in moves {
-        board.apply_force(mv);
-        let score = -search(board, ai_model, depth - 1, -beta, -alpha, Some(mv));
+        if board
+            .apply_force_with_check_illegal_move(mv, prev_hash)
+            .is_err()
+        {
+            //-30000と同義
+            continue;
+        };
+        let score = -search(
+            board,
+            ai_model,
+            depth - 1,
+            -beta,
+            -alpha,
+            Some(board.to_compression_bod()),
+        );
         board.undo_force(mv);
 
         if score > max_score {

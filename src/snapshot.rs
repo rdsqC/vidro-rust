@@ -7,5 +7,5 @@ pub struct BoardSnapshot {
     pub turn: i8, // 1が先手, -1が後手
     pub p1_hand_piece: u8,
     pub p2_hand_piece: u8,
-    pub prev_move: Option<MoveBit>,
+    pub prev_hash: Option<u64>,
 }

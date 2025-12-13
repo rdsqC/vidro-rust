@@ -1,6 +1,6 @@
 use crate::bitboard::{BITBOD_WIDTH, FIELD_BOD, FIELD_BOD_WIDTH};
 use crate::snapshot::BoardSnapshot;
-use std::arch::x86_64::_pext_u64;
+use std::arch::x86_64::{_pdep_u64, _pext_u64};
 
 macro_rules! build_features {
     ($snapshot: expr, [  $($feature_type:ty),* ]) => {
@@ -53,15 +53,18 @@ macro_rules! define_ai_model {
     };
 }
 
+NUM_FEATURES;
+
 define_ai_model!(
     target: BoardSnapshot,
     features: [
         PPFeatures,
         LineFeatures,
         BiasFeatures,
-        // TurnFeatures,
         HandPieceFeatures,
-        PrevMoveFeatures,
+        PrevPPFeatures,
+        PrevLineFeatures,
+        PrevHandPieceFeatures,
     ]
 );
 
@@ -80,6 +83,26 @@ impl Iterator for BitIter {
         let index = self.0.trailing_zeros();
         self.0 &= self.0 - 1;
         Some(index as usize)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct BitMapIter(u64);
+
+impl Iterator for BitMapIter {
+    type Item = usize;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.0 == 0 {
+            return None;
+        }
+
+        let index = self.0.trailing_zeros();
+
+        let field_idx = index as usize / BITBOD_WIDTH as usize * FIELD_BOD_WIDTH as usize
+            + index as usize % BITBOD_WIDTH as usize;
+
+        self.0 &= self.0 - 1;
+        Some(field_idx as usize)
     }
 }
 
@@ -202,6 +225,38 @@ pub const FEATURE_LINES: [LineConfig; 20] = {
     configs
 };
 
+const fn const_pext(src: u64, mask: u64) -> u64 {
+    let mut res = 0;
+    let mut dest_bit = 0;
+    let mut i = 0;
+
+    while i < 64 {
+        let bit = 1 << i;
+        if (mask & bit) != 0 {
+            if (src & bit) != 0 {
+                res |= 1 << dest_bit;
+            }
+            dest_bit += 1;
+        }
+        i += 1;
+    }
+    res
+}
+
+const FEATURE_LINES_FOR_PREV: [LineConfig; 20] = {
+    let mut result = [ZERO_CONFIG; FEATURE_LINES.len()];
+    let mut count = 0;
+    while count < FEATURE_LINES.len() {
+        result[count] = LineConfig {
+            mask: const_pext(FEATURE_LINES[count].mask, FIELD_BOD),
+            length: FEATURE_LINES[count].length,
+            offset: FEATURE_LINES[count].offset,
+        };
+        count += 1;
+    }
+    result
+};
+
 pub struct LineConfig {
     pub mask: u64,
     pub length: usize,
@@ -322,95 +377,67 @@ impl FeatureGroup for HandPieceFeatures {
     fn get_iter(snapshot: &BoardSnapshot, offset_set: usize) -> impl Iterator<Item = usize> {
         [
             offset_set + snapshot.p1_hand_piece as usize,
-            offset_set + snapshot.p2_hand_piece as usize,
+            offset_set + snapshot.p2_hand_piece as usize + 6,
         ]
         .into_iter()
     }
 }
 
-//PrevMove
-struct PrevMoveFeatures;
+//PrevPP
+struct PrevPPFeatures;
 
-impl FeatureGroup for PrevMoveFeatures {
-    const LEN: usize = 225;
+impl FeatureGroup for PrevPPFeatures {
+    const LEN: usize = (25 + 1) * 25 / 2;
     fn get_iter(snapshot: &BoardSnapshot, offset_set: usize) -> impl Iterator<Item = usize> {
-        snapshot
-            .prev_move
-            .map(|mv| {
-                if mv.angle_idx < 8 {
-                    offset_set
-                        + NUM_VALID_SQUARES
-                        + mv.field_idx() as usize
-                        + NUM_VALID_SQUARES * mv.angle_idx as usize
-                } else {
-                    offset_set + mv.field_idx() as usize
-                }
-            })
-            .into_iter()
+        snapshot.prev_hash.into_iter().flat_map(move |hash| {
+            let p1_iter = BitIter(snapshot.prev_hash.unwrap() >> (NUM_VALID_SQUARES + 1));
+            let p2_iter =
+                BitIter(((1 << NUM_VALID_SQUARES) - 1) & (snapshot.prev_hash.unwrap() >> 1))
+                    .map(|idx| idx + NUM_VALID_SQUARES);
+            let p1p2_iter = p1_iter.chain(p2_iter);
+
+            let pp_iter = p1p2_iter.clone().flat_map(move |sq1| {
+                p1p2_iter
+                    .clone()
+                    .filter(move |&sq2| sq1 <= sq2)
+                    .map(move |sq2| offset_set + (sq1 * NUM_VALID_SQUARES + sq2))
+            });
+
+            pp_iter
+        })
     }
 }
 
-// pub const NUM_FEATURES: usize = 289;
-//
-// impl BoardSnapshotFeatures for BoardSnapshot {
-//     fn iter_feature_indices(&self) -> impl Iterator<Item = usize> + '_ {
-//         let p1_packed = unsafe { _pext_u64(self.p1, FIELD_BOD) };
-//         let p2_packed = unsafe { _pext_u64(self.p2, FIELD_BOD) };
-//
-//         let offset_pp = 0;
-//         let p1_iter = BitIter(p1_packed);
-//         let p2_iter = BitIter(p2_packed).map(|idx| idx + NUM_VALID_SQUARES);
-//
-//         let p1p2_iter = p1_iter.chain(p2_iter.clone());
-//
-//         // 0~324 len=325
-//         let pp_iter = p1p2_iter.clone().flat_map(move |sq1| {
-//             p1p2_iter
-//                 .clone()
-//                 .filter(move |&sq2| sq1 <= sq2)
-//                 .map(move |sq2| offset_pp + (sq1 * NUM_VALID_SQUARES + sq2))
-//         });
-//
-//         let turn_offset = NUM_VALID_SQUARES * 2;
-//         //0~0 len=1
-//         let turn_iter = if self.turn == 0 {
-//             Some(turn_offset).into_iter()
-//         } else {
-//             None.into_iter()
-//         };
-//
-//         //bias_iter0~0 len=1
-//         let bias_iter = Some(turn_offset + 1).into_iter();
-//
-//         let hand_piece_offset = turn_offset + 2;
-//
-//         //bias_iter and hand_piece_iter 0~11 len=12
-//         let hand_piece_iter = [
-//             hand_piece_offset + self.p1_hand_piece as usize,
-//             hand_piece_offset + 6 + self.p2_hand_piece as usize,
-//         ]
-//         .into_iter();
-//
-//         let prev_move_offset = hand_piece_offset + 12;
-//         //Set 0 ~ 24, Flick(Shoot) 25 ~ 224 len=225
-//         let prev_move_iter = self
-//             .prev_move
-//             .map(|mv| {
-//                 if mv.angle_idx < 8 {
-//                     prev_move_offset
-//                         + NUM_VALID_SQUARES
-//                         + mv.field_idx() as usize
-//                         + NUM_VALID_SQUARES * mv.angle_idx as usize
-//                 } else {
-//                     prev_move_offset + mv.field_idx() as usize
-//                 }
-//             })
-//             .into_iter();
-//
-//         pp_iter
-//             .chain(turn_iter)
-//             .chain(bias_iter)
-//             .chain(hand_piece_iter)
-//             .chain(prev_move_iter)
-//     }
-// }
+//PrevLINE
+struct PrevLineFeatures;
+
+impl FeatureGroup for PrevLineFeatures {
+    const LEN: usize = 3348;
+    fn get_iter(snapshot: &BoardSnapshot, offset_set: usize) -> impl Iterator<Item = usize> {
+        snapshot.prev_hash.into_iter().flat_map(move |hash| {
+            let p1 = snapshot.prev_hash.unwrap() >> (NUM_VALID_SQUARES + 1);
+            let p2 = ((1 << NUM_VALID_SQUARES) - 1) & (snapshot.prev_hash.unwrap() >> 1);
+            FEATURE_LINES_FOR_PREV.iter().map(move |line_config| {
+                let white_line: u64 = unsafe { _pext_u64(p1, line_config.mask) };
+                let black_line: u64 = unsafe { _pext_u64(p2, line_config.mask) };
+                offset_set + line_config.offset + encode_ternary_lut(white_line, black_line)
+            })
+        })
+    }
+}
+
+//PrevHandPiece
+struct PrevHandPieceFeatures;
+
+impl FeatureGroup for PrevHandPieceFeatures {
+    const LEN: usize = 12;
+    fn get_iter(snapshot: &BoardSnapshot, offset_set: usize) -> impl Iterator<Item = usize> {
+        snapshot.prev_hash.into_iter().flat_map(move |hash| {
+            [
+                offset_set + hash.count_ones() as usize,
+                offset_set + hash.count_ones() as usize + 6,
+            ]
+            .into_iter()
+        })
+    }
+}

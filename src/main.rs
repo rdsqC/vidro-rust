@@ -79,7 +79,7 @@ fn main() {
         let mut vidro = Bitboard::new_initial();
 
         let mut move_count = 0;
-        let mut prev_move = None;
+        let mut prev_hash: Option<u64> = None;
         const MAX_MOVES: usize = 100;
         const RANDOM_MOVES_UNTIL: usize = 0;
 
@@ -110,7 +110,7 @@ fn main() {
             let mut best_move: MoveBit;
             if move_count < RANDOM_MOVES_UNTIL {
                 println!("----ランダムループを選択----");
-                let legal_moves = vidro.generate_legal_move(prev_move);
+                let legal_moves = vidro.generate_legal_move();
                 if legal_moves.is_empty() {
                     break;
                 }
@@ -119,7 +119,11 @@ fn main() {
                 let is_turn_humen = vidro.turn == 1;
                 if is_turn_humen {
                     println!("手を選択");
-                    let legal_moves = vidro.generate_legal_move(prev_move);
+                    let legal_moves = vidro
+                        .generate_legal_move()
+                        .into_iter()
+                        .filter(move |&mv| vidro.check_illegal_move(mv, prev_hash))
+                        .collect();
                     MoveBit::print_vec_to_string(&legal_moves);
                     while {
                         best_move = Bitboard::read_to_move();
@@ -128,33 +132,6 @@ fn main() {
                 } else {
                     println!("思考中...");
                     let search_depth = 5;
-
-                    // let log_file_for_thread = Arc::clone(&log_file);
-                    // let tt_for_thread = Arc::clone(&tt);
-                    //
-                    // tt.lock().unwrap().clear();
-                    //
-                    // let score;
-                    // (score, best_move) = {
-                    //     let result = find_best_move(
-                    //         &mut vidro,
-                    //         search_depth,
-                    //         tt_for_thread,
-                    //         log_file_for_thread,
-                    //         prev_move,
-                    //     );
-                    //     if result.1.is_some() {
-                    //         (result.0, result.1.unwrap())
-                    //     } else {
-                    //         println!("指せる手がありません。手番プレイヤーの負けです");
-                    //         break;
-                    //     }
-                    // };
-                    // println!(
-                    //     "\nalphabeta 決定手: {} 評価値{}",
-                    //     best_move.to_string(),
-                    //     score
-                    // );
 
                     let tt_for_thread = Arc::clone(&tt);
 
@@ -167,7 +144,7 @@ fn main() {
                             0,
                             search_depth,
                             tt_for_thread,
-                            prev_move,
+                            prev_hash,
                             &evaluate,
                         );
                         if result.1.is_some() {
@@ -181,8 +158,14 @@ fn main() {
                 }
             }
             println!("\n決定手: {}", best_move.to_string());
-            vidro.apply_force(best_move);
-            prev_move = Some(best_move);
+            prev_hash = Some(vidro.to_compression_bod());
+            match vidro.apply_force_with_check_illegal_move(best_move, prev_hash) {
+                Ok(()) => {}
+                Err(()) => {
+                    println!("反則手。手番プレイヤーの負けです");
+                    break;
+                }
+            };
 
             move_count += 1;
         }

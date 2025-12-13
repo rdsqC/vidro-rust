@@ -16,9 +16,9 @@ const USE_CACHE: bool = true;
 const DRAW_SCORE: i16 = 0;
 const WIN_LOSE_SCORE: i16 = 30000;
 
-fn evaluate_for_negamax(board: &mut Bitboard, prev_move: Option<MoveBit>) -> i16 {
+fn evaluate_for_negamax(board: &mut Bitboard, prev_hash: Option<u64>) -> i16 {
     // eval_mon(board, prev_move)
-    static_evaluation(board, prev_move) * board.turn as i16
+    static_evaluation(board, prev_hash) * board.turn as i16
 }
 
 #[derive(Clone, Default)]
@@ -55,7 +55,7 @@ pub fn alphabeta<F>(
     // process: &mut Progress,
     is_root: bool, // ★自分がルートノード（探索の起点）かを知るためのフラグ
     shared_info: Arc<Mutex<SearchInfo>>, // ★情報共有のための構造体
-    prev_move: Option<MoveBit>,
+    prev_hash: Option<u64>,
     evaluate: &F,
 ) -> (i16, Vec<MoveBit>)
 where
@@ -89,9 +89,9 @@ where
 
     if depth == 0 {
         route.pop();
-        let tsumi_result = find_mate_sequence(board, 1, prev_move);
+        let tsumi_result = find_mate_sequence(board, 1, prev_hash);
 
-        let static_score = evaluate(&board.to_snapshot(prev_move)) * board.turn as i16;
+        let static_score = evaluate(&board.to_snapshot(prev_hash)) * board.turn as i16;
         //詰み探索を実行
         let tsumi_found = if tsumi_result.is_some() { 1 } else { 0 };
 
@@ -132,7 +132,7 @@ where
         }
     }
 
-    let mut moves = board.generate_legal_move(prev_move);
+    let mut moves = board.generate_legal_move();
     if let Some(tt_move) = best_move_from_tt {
         if let Some(pos) = moves.iter().position(|m| *m == tt_move) {
             let m = moves.remove(pos);
@@ -145,7 +145,12 @@ where
 
     for &mv in &moves {
         //手を実行
-        board.apply_force(mv);
+        if board
+            .apply_force_with_check_illegal_move(mv, prev_hash)
+            .is_err()
+        {
+            continue;
+        }
         //その手ができた場合
         let (mut score, mut child_pv) = alphabeta(
             board,
@@ -157,7 +162,7 @@ where
             // process,
             false,
             shared_info.clone(),
-            Some(mv),
+            Some(hash),
             evaluate,
         );
         score = -score;
@@ -216,7 +221,7 @@ pub fn mtd_f<F>(
     f: i16,
     depth: usize,
     tt: Arc<Mutex<LruCache<u64, TTEntry>>>,
-    prev_move: Option<MoveBit>,
+    prev_hash: Option<u64>,
     evaluate: &F,
 ) -> (i16, Option<MoveBit>)
 where
@@ -254,7 +259,7 @@ where
                         &mut route,
                         true,
                         shared_info.clone(),
-                        prev_move,
+                        prev_hash,
                         evaluate,
                     );
                     if g < beta {
@@ -302,7 +307,7 @@ fn find_best_move<F>(
     board: &mut Bitboard,
     max_depth: usize,
     tt: Arc<Mutex<LruCache<u64, TTEntry>>>,
-    prev_move: Option<MoveBit>,
+    prev_hash: Option<u64>,
     evaluate: &F,
 ) -> (i16, Option<MoveBit>)
 where
@@ -336,7 +341,7 @@ where
                     // &mut process,
                     true,
                     shared_info.clone(),
-                    prev_move,
+                    prev_hash,
                     evaluate,
                 );
                 result_score = score;
