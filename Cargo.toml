@@ -17,3 +17,6 @@ codegen-units = 1
 panic = "abort"
 
 target-cpu = "native"
+
+[build]
+rustflags = ["-C", "target-cpu=native"]
