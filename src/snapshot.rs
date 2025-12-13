@@ -1,6 +1,6 @@
 use crate::bitboard::MoveBit;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct BoardSnapshot {
     pub p1: u64,
     pub p2: u64,
