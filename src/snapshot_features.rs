@@ -202,10 +202,10 @@ pub const FEATURE_LINES: [LineConfig; 20] = {
     configs
 };
 
-struct LineConfig {
-    mask: u64,
-    length: usize,
-    offset: usize,
+pub struct LineConfig {
+    pub mask: u64,
+    pub length: usize,
+    pub offset: usize,
 }
 
 const MAX_LINE_LEN: usize = 5;
