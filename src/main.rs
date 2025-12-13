@@ -3,14 +3,18 @@ mod bitboard_console;
 mod checkmate_search;
 mod eval;
 mod eval_value;
+mod pre_train;
+mod random_state_generator;
 mod search;
 mod self_match;
 mod snapshot;
 mod snapshot_features;
 use bitboard::{Bitboard, MoveBit};
-use bitboard_console::BitboardConsole;
+use bitboard_console::{BitboardConsole, print_u64};
 use eval_value::{Eval, EvalValue};
+
 use lru::LruCache;
+use pre_train::pre_train_with_manual_eval;
 use rand::seq::IndexedRandom;
 use search::mtd_f;
 use std::fs::{File, OpenOptions, metadata};
@@ -18,32 +22,38 @@ use std::io::Write;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 
-use crate::checkmate_search::generate_threat_moves;
 use crate::eval::AiModel;
 use crate::self_match::generate_self_play_data;
 use crate::snapshot::BoardSnapshot;
-use crate::snapshot_features::BoardSnapshotFeatures;
+use crate::snapshot_features::{BoardSnapshotFeatures, FEATURE_LINES, NUM_FEATURES};
 
 fn main() {
+    const RANDOM_MOVES_UNTIL: usize = 5;
+
+    println!("NUM_FEATURES: {}", NUM_FEATURES);
+
     let mut ai_ctx = AiModel::rand_new();
 
     let batch_size = 100;
-    let epochs = 1000;
+    let epochs = 10000;
 
     println!(
         "start learning\nepochs:{} batch_size:{}",
         epochs, batch_size
     );
 
+    pre_train_with_manual_eval(&mut ai_ctx, 1000000, 15);
+
+    println!("start self match");
     for epoch in 0..epochs {
         // 自己対局
-        let games = generate_self_play_data(&ai_ctx.weights, batch_size);
+        let games = generate_self_play_data(RANDOM_MOVES_UNTIL, &ai_ctx.weights, batch_size);
 
         //重み更新
         ai_ctx.update_from_batch(&games);
 
         //ログ出力
-        if epoch % 10 == 0 {
+        if epoch % 100 == 0 {
             let win_rate = games.iter().map(|g| g.score).sum::<f32>() / batch_size as f32;
             println!("Epoch {}: 先手勝率: {:.3}", epoch, win_rate);
         }
@@ -53,7 +63,7 @@ fn main() {
 
     let evaluate = |snapshot: &BoardSnapshot| {
         let z = ai_ctx.eval_score(snapshot.iter_feature_indices());
-        ((z * 100.0) as i16).clamp(-29000, 29000)
+        ((z * 2.0) as i16).clamp(-29000, 29000)
     };
 
     let tt = Arc::new(Mutex::new(LruCache::new(
@@ -112,7 +122,7 @@ fn main() {
                     } {}
                 } else {
                     println!("思考中...");
-                    let search_depth = 5;
+                    let search_depth = 9;
 
                     // let log_file_for_thread = Arc::clone(&log_file);
                     // let tt_for_thread = Arc::clone(&tt);

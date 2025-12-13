@@ -149,6 +149,7 @@ pub struct AiModel {
     pub weights: Vec<f32>,
 }
 
+#[derive(Debug)]
 pub struct GameResult {
     pub history: Vec<BoardSnapshot>,
     pub score: f32, // 1.0: 先手勝ち, 0.0 先手負け
@@ -210,8 +211,20 @@ impl AiModel {
                 .for_each(|idx| accumulator[idx] += error);
         }
     }
+    pub fn update_from_snapshot(&mut self, snapshot: BoardSnapshot, target: f32) {
+        let z: f32 = self.eval_score(snapshot.iter_feature_indices());
+        let p = sigmoid(z);
+        //誤差
+        let error = target - p;
+
+        //勾配加算
+        snapshot.iter_feature_indices().for_each(|idx| {
+            let regularization = LAMBDA * self.weights[idx];
+            self.weights[idx] += LEARNING_RATE * (error - regularization);
+        });
+    }
 }
 
-fn sigmoid(x: f32) -> f32 {
+pub fn sigmoid(x: f32) -> f32 {
     1.0 / (1.0 + (-x).exp())
 }
