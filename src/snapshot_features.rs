@@ -59,7 +59,7 @@ define_ai_model!(
         PPFeatures,
         LineFeatures,
         BiasFeatures,
-        TurnFeatures,
+        // TurnFeatures,
         HandPieceFeatures,
         PrevMoveFeatures,
     ]
