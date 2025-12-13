@@ -1,9 +1,11 @@
+use core::f32;
 use std::collections::HashSet;
 
 use crate::{
     bitboard::{Bitboard, MoveBit},
     bitboard_console::print_u64,
-    eval::GameResult,
+    eval::{AiModel, GameResult},
+    eval_value,
     random_state_generator::random_state_generator,
     snapshot::BoardSnapshot,
     snapshot_features::BoardSnapshotFeatures,
@@ -13,14 +15,14 @@ use rayon::prelude::*;
 
 pub fn generate_self_play_data(
     random_moves_until: usize,
-    current_weights: &[f32],
+    ai_model: &AiModel,
     batch_size: usize,
 ) -> Vec<GameResult> {
     (0..batch_size)
         .into_par_iter()
         .map(|_| {
             let (mut board, mut prev_move) = random_state_generator(random_moves_until);
-            let mut history: Vec<BoardSnapshot> = Vec::with_capacity(100);
+            let mut history: Vec<BoardSnapshot> = Vec::with_capacity(20);
 
             let mut seen_state: HashSet<u64> = HashSet::new();
 
@@ -35,8 +37,8 @@ pub fn generate_self_play_data(
 
                 seen_state.insert(state_hash);
 
-                let temp = if turn_count < 20 { 1.5 } else { 0.5 };
-                if let Some(mv) = select_move_softmax(&board, current_weights, temp, prev_move) {
+                let temp = if turn_count < 5 { 1.5 } else { 0.5 };
+                if let Some(mv) = select_move_softmax(&board, ai_model, temp, prev_move) {
                     board.apply_force(mv);
                     prev_move = Some(mv);
                 } else {
@@ -64,7 +66,7 @@ pub fn generate_self_play_data(
 
 fn select_move_softmax(
     board: &Bitboard,
-    weights: &[f32],
+    ai_model: &AiModel,
     temperature: f32,
     prev_move: Option<MoveBit>,
 ) -> Option<MoveBit> {
@@ -78,26 +80,15 @@ fn select_move_softmax(
         .map(|&mv| {
             let mut next_board = board.clone();
             next_board.apply_force(mv);
-
-            // if (next_board.player_bods[0] & next_board.player_bods[1]) != 0 {
-            //     println!("CRITICAL ERROR: Bitboard overlap detected!");
-            //     println!("Move: {:?}", mv);
-            //     print_u64("P1", next_board.player_bods[0]);
-            //     print_u64("P2", next_board.player_bods[1]);
-            //     print_u64(
-            //         "Overlap",
-            //         next_board.player_bods[0] & next_board.player_bods[1],
-            //     );
-            //     panic!("Data corruption in apply_force");
-            // }
-
-            let snapshot = next_board.to_snapshot(Some(mv));
-            let z: f32 = snapshot
-                .iter_feature_indices()
-                .map(|idx| weights[idx])
-                .sum();
-
-            z * snapshot.turn as f32 //常に先手の勝率を予測しているため反転させる
+            let z: f32 = -search(
+                &mut next_board,
+                ai_model,
+                3,
+                f32::NEG_INFINITY,
+                f32::INFINITY,
+                prev_move,
+            ); //常に先手の勝率を予測しているため反転させる
+            z
         })
         .collect();
 
@@ -112,4 +103,48 @@ fn select_move_softmax(
     let mut rng = rand::rng();
 
     Some(legal_moves[dist.sample(&mut rng)])
+}
+
+fn search(
+    board: &mut Bitboard,
+    ai_model: &AiModel,
+    depth: usize,
+    mut alpha: f32,
+    beta: f32,
+    prev_move: Option<MoveBit>,
+) -> f32 {
+    if board.game_over() {
+        return 30000.0 * board.win_turn() as f32 * board.turn as f32;
+    }
+    if depth == 0 {
+        let score = ai_model.eval_score(board.to_snapshot(prev_move).iter_feature_indices())
+            * board.turn as f32;
+        return score;
+    }
+
+    let moves = board.generate_legal_move(prev_move);
+    if moves.is_empty() {
+        return ai_model.eval_score(board.to_snapshot(prev_move).iter_feature_indices())
+            * board.turn as f32;
+    }
+
+    let mut max_score = f32::NEG_INFINITY;
+    for mv in moves {
+        board.apply_force(mv);
+        let score = -search(board, ai_model, depth - 1, -beta, -alpha, Some(mv));
+        board.undo_force(mv);
+
+        if score > max_score {
+            max_score = score;
+        }
+
+        if max_score >= beta {
+            break;
+        }
+        if max_score > alpha {
+            alpha = max_score;
+        }
+    }
+
+    max_score
 }
