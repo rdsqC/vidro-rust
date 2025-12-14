@@ -1,5 +1,5 @@
-use core::f32;
-use std::collections::HashSet;
+use core::{f32, hash};
+use std::{collections::HashSet, thread::current};
 
 use crate::{
     bitboard::{Bitboard, MoveBit},
@@ -10,17 +10,29 @@ use crate::{
     snapshot::BoardSnapshot,
     snapshot_features::BoardSnapshotFeatures,
 };
-use rand::distr::{Distribution, weighted::WeightedIndex};
+use rand::{
+    Rng,
+    distr::{Distribution, weighted::WeightedIndex},
+};
 use rayon::prelude::*;
 
 pub fn generate_self_play_data(
     random_moves_until: usize,
-    ai_model: &AiModel,
+    current_model: &AiModel,
+    past_models: &[AiModel],
     batch_size: usize,
 ) -> Vec<GameResult> {
     (0..batch_size)
         .into_par_iter()
         .map(|_| {
+            let mut rng = rand::rng();
+
+            let p2_model = if !past_models.is_empty() && rng.random_bool(0.3) {
+                &past_models[rng.random_range(0..past_models.len())]
+            } else {
+                current_model
+            };
+
             let (mut board, mut prev_hash) = random_state_generator(random_moves_until);
             let mut history: Vec<BoardSnapshot> = Vec::with_capacity(20);
 
@@ -28,6 +40,8 @@ pub fn generate_self_play_data(
 
             let mut turn_count = 0;
             while !board.game_over() {
+                let current_hash = board.to_compression_bod();
+
                 history.push(board.to_snapshot(prev_hash));
 
                 let state_hash = board.to_compression_bod();
@@ -38,10 +52,17 @@ pub fn generate_self_play_data(
                 seen_state.insert(state_hash);
 
                 let temp = if turn_count < 5 { 1.5 } else { 0.5 };
-                if let Some(mv) = select_move_softmax(&board, ai_model, temp, prev_hash) {
-                    prev_hash = Some(board.to_compression_bod());
+
+                //ターンに合わせてモデルを切り替え
+                let model_to_use = if turn_count % 2 == 0 {
+                    current_model
+                } else {
+                    p2_model
+                };
+
+                if let Some(mv) = select_move_softmax(&board, model_to_use, temp, prev_hash) {
                     if board
-                        .apply_force_with_check_illegal_move(mv, prev_hash)
+                        .apply_force_with_check_illegal_move(mv, Some(current_hash))
                         .is_err()
                     {
                         panic!("AiModel must not selected illegal move");
@@ -50,6 +71,7 @@ pub fn generate_self_play_data(
                     break;
                 }
 
+                prev_hash = Some(current_hash);
                 turn_count += 1;
             }
 

@@ -24,4 +24,3 @@ pub fn load_model(file_path: &str) -> std::io::Result<AiModel> {
     println!("Loaded model");
     Ok(model)
 }
-

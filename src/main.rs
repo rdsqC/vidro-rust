@@ -15,6 +15,7 @@ use bitboard::{Bitboard, MoveBit};
 use bitboard_console::{BitboardConsole, print_u64};
 use eval_value::{Eval, EvalValue};
 
+use clap::{Parser, Subcommand};
 use lru::LruCache;
 use pre_train::pre_train_with_manual_eval;
 use rand::seq::IndexedRandom;
@@ -30,7 +31,46 @@ use crate::snapshot::BoardSnapshot;
 use crate::snapshot_features::{BoardSnapshotFeatures, FEATURE_LINES, NUM_FEATURES};
 use crate::util::{load_model, save_model};
 
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    Train {
+        #[arg(short, long, default_value_t = 10000)]
+        epochs: usize,
+
+        #[arg(short, long, default_value_t = 320)]
+        batch_size: usize,
+    },
+    Play {
+        #[arg(short, long, default_value_t = 5)]
+        depth: usize,
+
+        //先手1 後手0
+        #[arg(short, long, default_value_t = 1)]
+        human_turn: i8,
+    },
+}
+
 fn main() {
+    let cli = Cli::parse();
+
+    match &cli.command {
+        &Commands::Train { epochs, batch_size } => {
+            train_mode(epochs, batch_size);
+        }
+        &Commands::Play { depth, human_turn } => {
+            play_mode(depth, human_turn);
+        }
+    }
+}
+
+fn train_mode(epochs: usize, batch_size: usize) {
     const RANDOM_MOVES_UNTIL: usize = 5;
 
     println!("NUM_FEATURES: {}", NUM_FEATURES);
@@ -52,8 +92,10 @@ fn main() {
         pre_train_with_manual_eval(&mut ai_ctx, 1000000, 15);
     }
 
-    let batch_size = 160;
-    let epochs = 2000;
+    // let batch_size = 320;
+    // let epochs = 10000;
+
+    let mut past_models_pool: Vec<AiModel> = Vec::new();
 
     println!(
         "start learning\nepochs:{} batch_size:{}",
@@ -62,8 +104,14 @@ fn main() {
 
     println!("start self match");
     for epoch in 1..=epochs {
+        let opponent_pool: &Vec<AiModel> = if past_models_pool.len() > 5 && epoch % 2 == 0 {
+            &past_models_pool
+        } else {
+            &vec![]
+        };
+
         // 自己対局
-        let games = generate_self_play_data(RANDOM_MOVES_UNTIL, &ai_ctx, batch_size);
+        let games = generate_self_play_data(RANDOM_MOVES_UNTIL, &ai_ctx, opponent_pool, batch_size);
 
         //重み更新
         ai_ctx.update_from_batch(&games);
@@ -91,13 +139,35 @@ fn main() {
                 epoch, win_rate, ave_moves
             );
         }
+
+        if epoch % 20 == 0 {
+            past_models_pool.push(ai_ctx.clone());
+            if past_models_pool.len() > 100 {
+                //100を超えたら古いモデルデータを削除
+                past_models_pool.remove(0);
+            }
+        }
     }
 
     println!("学習完了");
+}
+
+fn play_mode(depth: usize, human_turn: i8) {
+    let load_path = "model_latest.bin";
+
+    if !std::path::Path::new(load_path).exists() {
+        println!("load_path:{} i not exists. ", load_path);
+        return;
+    }
+
+    let Ok(ai_ctx) = load_model(load_path) else {
+        println!("Failed load model file");
+        return;
+    };
 
     let evaluate = |snapshot: &BoardSnapshot| {
         let z = ai_ctx.eval_score(snapshot.iter_feature_indices());
-        ((z * 2.0) as i16).clamp(-29000, 29000)
+        ((z * 40.0) as i16).clamp(-29000, 29000)
     };
 
     let tt = Arc::new(Mutex::new(LruCache::new(
@@ -145,13 +215,13 @@ fn main() {
                 }
                 best_move = (*legal_moves.choose(&mut rand::rng()).unwrap()).clone();
             } else {
-                let is_turn_humen = vidro.turn == 1;
+                let is_turn_humen = vidro.turn == human_turn * 2 - 1;
                 if is_turn_humen {
                     println!("手を選択");
                     let legal_moves = vidro
                         .generate_legal_move()
                         .into_iter()
-                        .filter(move |&mv| vidro.check_illegal_move(mv, prev_hash))
+                        .filter(move |&mv| !vidro.check_illegal_move(mv, prev_hash))
                         .collect();
                     MoveBit::print_vec_to_string(&legal_moves);
                     while {
@@ -160,7 +230,6 @@ fn main() {
                     } {}
                 } else {
                     println!("思考中...");
-                    let search_depth = 5;
 
                     let tt_for_thread = Arc::clone(&tt);
 
@@ -168,14 +237,8 @@ fn main() {
 
                     let score;
                     (score, best_move) = {
-                        let result = mtd_f(
-                            &mut vidro,
-                            0,
-                            search_depth,
-                            tt_for_thread,
-                            prev_hash,
-                            &evaluate,
-                        );
+                        let result =
+                            mtd_f(&mut vidro, 0, depth, tt_for_thread, prev_hash, &evaluate);
                         if result.1.is_some() {
                             (result.0, result.1.unwrap())
                         } else {
