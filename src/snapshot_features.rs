@@ -58,13 +58,14 @@ NUM_FEATURES;
 define_ai_model!(
     target: BoardSnapshot,
     features: [
-        PPFeatures,
         LineFeatures,
         BiasFeatures,
         HandPieceFeatures,
         PrevPPFeatures,
         PrevLineFeatures,
         PrevHandPieceFeatures,
+        PPFeatures,
+        PPPFeature,
     ]
 );
 
@@ -307,27 +308,90 @@ fn encode_ternary_lut(a: u64, b: u64) -> usize {
     TERNARY_LUT[index] as usize
 }
 
-//2駒関係。ただし同じ駒同士の関係も含む
+#[inline(always)]
+const fn combination(n: usize, r: usize) -> usize {
+    if n < r {
+        return 0;
+    }
+    let mut result: usize = 1;
+
+    let mut count = 0;
+    while count < r {
+        result *= n - count;
+        count += 1;
+    }
+
+    let mut per = 1;
+    let mut count = 0;
+    while count < r {
+        per *= 1 + count;
+        count += 1;
+    }
+
+    result /= per;
+
+    result
+}
+
+//2駒関係
 struct PPFeatures;
 
 impl FeatureGroup for PPFeatures {
-    const LEN: usize = 325;
+    const LEN: usize = combination(25, 2) * 2usize.pow(2);
     fn get_iter(snapshot: &BoardSnapshot, offset_set: usize) -> impl Iterator<Item = usize> {
         let p1_packed = unsafe { _pext_u64(snapshot.p1, FIELD_BOD) };
         let p2_packed = unsafe { _pext_u64(snapshot.p2, FIELD_BOD) };
 
-        let p1_iter = BitIter(p1_packed);
-        let p2_iter = BitIter(p2_packed).map(|idx| idx + NUM_VALID_SQUARES);
+        let p1_iter = BitIter(p1_packed).map(|sq| (sq, 0usize));
+        let p2_iter = BitIter(p2_packed).map(|sq| (sq, 1usize));
         let p1p2_iter = p1_iter.chain(p2_iter);
 
-        let pp_iter = p1p2_iter.clone().flat_map(move |sq1| {
+        let pp_iter = p1p2_iter.clone().flat_map(move |(sq1, sq1_player)| {
             p1p2_iter
                 .clone()
-                .filter(move |&sq2| sq1 <= sq2)
-                .map(move |sq2| offset_set + (sq1 * NUM_VALID_SQUARES + sq2))
+                .filter(move |&(sq2, _)| sq1 < sq2)
+                .map(move |(sq2, sq2_player)| {
+                    let spatial_idx = (combination(sq1, 2)) + combination(sq2, 1);
+
+                    let type_idx = (sq1_player << 1) | sq2_player;
+
+                    offset_set + spatial_idx + combination(25, 2) * type_idx
+                })
         });
 
         pp_iter
+    }
+}
+
+//3駒関係
+struct PPPFeature;
+
+impl FeatureGroup for PPPFeature {
+    const LEN: usize = combination(25, 3) * 2usize.pow(3);
+    fn get_iter(snapshot: &BoardSnapshot, offset_set: usize) -> impl Iterator<Item = usize> {
+        let p1_packed = unsafe { _pext_u64(snapshot.p1, FIELD_BOD) };
+        let p2_packed = unsafe { _pext_u64(snapshot.p2, FIELD_BOD) };
+
+        let occupied = p1_packed | p2_packed;
+
+        BitIter(occupied).flat_map(move |sq1| {
+            let mask2 = occupied & !((1u64 << (sq1 + 1)) - 1);
+            BitIter(mask2).flat_map(move |sq2| {
+                let mask3 = occupied & !((1u64 << (sq2 + 1)) - 1);
+                BitIter(mask3).map(move |sq3| {
+                    let pl1 = if (p1_packed >> sq1) & 1 == 1 { 0 } else { 1 };
+                    let pl2 = if (p1_packed >> sq2) & 1 == 1 { 0 } else { 1 };
+                    let pl3 = if (p1_packed >> sq3) & 1 == 1 { 0 } else { 1 };
+
+                    let spatial_idx =
+                        combination(sq3, 3) + combination(sq2, 2) + combination(sq1, 1);
+
+                    let type_idx = (pl1 << 2) | (pl2 << 1) | pl3;
+
+                    offset_set + combination(25, 3) * type_idx + spatial_idx
+                })
+            })
+        })
     }
 }
 
