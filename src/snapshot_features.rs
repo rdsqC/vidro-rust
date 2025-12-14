@@ -1,6 +1,8 @@
 use crate::bitboard::{BITBOD_WIDTH, FIELD_BOD, FIELD_BOD_WIDTH};
+use crate::random_state_generator::random_state_generator;
 use crate::snapshot::BoardSnapshot;
 use std::arch::x86_64::{_pdep_u64, _pext_u64};
+use std::process::Output;
 
 macro_rules! build_features {
     ($snapshot: expr, [  $($feature_type:ty),* ]) => {
@@ -53,7 +55,21 @@ macro_rules! define_ai_model {
     };
 }
 
-NUM_FEATURES;
+macro_rules! run_feature_tests {
+    ($($feature_type:ty),*) => {
+        for _ in 0..10000 {
+            let (board, _) = random_state_generator(16);
+            let snapshot = board.to_snapshot(None);
+            board.print_data();
+            $(
+                let def_len: usize = <$feature_type as FeatureGroup>::LEN;
+                let count: usize = <$feature_type as FeatureGroup>::get_iter(&snapshot, 0).max().unwrap_or(0);
+
+                assert!(count <= def_len, "Feature length {} has is {}. But there are featrue which has {} offset", stringify!($features_type), def_len, count);
+            )*
+        }
+    };
+}
 
 define_ai_model!(
     target: BoardSnapshot,
@@ -68,6 +84,22 @@ define_ai_model!(
         PPPFeature,
     ]
 );
+
+#[test]
+fn test() {
+    use crate::bitboard_console::BitboardConsole;
+
+    run_feature_tests!(
+        LineFeatures,
+        BiasFeatures,
+        HandPieceFeatures,
+        PrevPPFeatures,
+        PrevLineFeatures,
+        PrevHandPieceFeatures,
+        PPFeatures,
+        PPPFeature
+    );
+}
 
 const NUM_VALID_SQUARES: usize = FIELD_BOD.count_ones() as usize;
 

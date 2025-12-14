@@ -17,7 +17,7 @@ pub fn random_state_generator(num_turn: usize) -> (Bitboard, Option<u64>) {
             choosed_move = (*legal_moves.choose(&mut rand::rng()).unwrap()).clone();
             board
                 .apply_force_with_check_illegal_move(choosed_move, prev_hash)
-                .is_ok()
+                .is_err()
         } {}
         prev_hash = Some(hash);
     }
