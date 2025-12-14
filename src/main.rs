@@ -8,6 +8,8 @@ mod random_state_generator;
 mod search;
 mod self_match;
 mod snapshot;
+mod util;
+
 mod snapshot_features;
 use bitboard::{Bitboard, MoveBit};
 use bitboard_console::{BitboardConsole, print_u64};
@@ -26,13 +28,29 @@ use crate::eval::AiModel;
 use crate::self_match::generate_self_play_data;
 use crate::snapshot::BoardSnapshot;
 use crate::snapshot_features::{BoardSnapshotFeatures, FEATURE_LINES, NUM_FEATURES};
+use crate::util::{load_model, save_model};
 
 fn main() {
     const RANDOM_MOVES_UNTIL: usize = 5;
 
     println!("NUM_FEATURES: {}", NUM_FEATURES);
 
-    let mut ai_ctx = AiModel::rand_new();
+    let mut ai_ctx;
+
+    let load_path = "model_latest.bin";
+    if std::path::Path::new(load_path).exists() {
+        match load_model(load_path) {
+            Ok(m) => ai_ctx = m,
+            Err(e) => {
+                eprintln!("Load failure: {}\n(Create new)", e);
+                ai_ctx = AiModel::rand_new();
+                pre_train_with_manual_eval(&mut ai_ctx, 1000000, 15);
+            }
+        }
+    } else {
+        ai_ctx = AiModel::rand_new();
+        pre_train_with_manual_eval(&mut ai_ctx, 1000000, 15);
+    }
 
     let batch_size = 160;
     let epochs = 2000;
@@ -42,8 +60,6 @@ fn main() {
         epochs, batch_size
     );
 
-    pre_train_with_manual_eval(&mut ai_ctx, 1000000, 15);
-
     println!("start self match");
     for epoch in 1..=epochs {
         // 自己対局
@@ -51,6 +67,19 @@ fn main() {
 
         //重み更新
         ai_ctx.update_from_batch(&games);
+
+        //最新データの保存
+        if let Err(e) = save_model(&ai_ctx, "model_latest.bin") {
+            eprintln!("Err to save: {}", e);
+        };
+
+        if epoch % 100 == 0 {
+            let backup_path = format!("models/model_epoch_{}.bin", epoch);
+            std::fs::create_dir_all("models").unwrap();
+            if let Err(e) = save_model(&ai_ctx, &backup_path) {
+                eprintln!("Failed to save backup\n{}", e);
+            }
+        }
 
         //ログ出力
         if epoch % 10 == 0 {

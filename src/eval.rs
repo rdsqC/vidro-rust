@@ -1,4 +1,5 @@
 use rand::{Rng, distr::Uniform};
+use serde::{Deserialize, Serialize};
 
 use super::bitboard::{Bitboard, FIELD_BOD, FIELD_BOD_HEIGHT, FIELD_BOD_WIDTH, MoveBit};
 use super::checkmate_search::generate_threat_moves;
@@ -151,6 +152,7 @@ use rayon::prelude::*;
 const LEARNING_RATE: f32 = 0.1;
 const LAMBDA: f32 = 0.0001; //正則化係数
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AiModel {
     pub weights: Vec<f32>,
 }
