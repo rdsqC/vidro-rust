@@ -178,6 +178,7 @@ where
                 let mut info = shared_info.lock().unwrap();
                 info.score = best_score;
                 info.pv = best_pv.clone();
+                info.depth = depth;
                 // info.nodes = process.nodes_searched;
             }
         }

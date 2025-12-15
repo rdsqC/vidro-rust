@@ -149,7 +149,7 @@ use crate::snapshot::BoardSnapshot;
 use crate::snapshot_features::{BitIter, BoardSnapshotFeatures, NUM_FEATURES};
 use rayon::prelude::*;
 
-const LEARNING_RATE: f32 = 0.1;
+const LEARNING_RATE: f32 = 1e-3;
 const LAMBDA: f32 = 0.0001; //正則化係数
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -177,7 +177,7 @@ impl AiModel {
     pub fn eval_score_from_vec(&self, features: &[usize]) -> f32 {
         features.iter().map(|&n| self.weights[n]).sum()
     }
-    pub fn update_from_batch(&mut self, batch: &[GameResult]) {
+    pub fn update_from_batch_and_get_update_norm(&mut self, batch: &[GameResult]) -> f32 {
         let batch_size = batch.len() as f32;
         let total_gradients: Vec<f32> = batch
             .par_iter()
@@ -198,12 +198,21 @@ impl AiModel {
                 },
             );
 
+        let mut update_norm_square: f32 = 0.0;
+
         let eta = LEARNING_RATE / batch_size;
         for i in 0..NUM_FEATURES {
             let gradient = total_gradients[i];
             let regularization = LAMBDA * self.weights[i];
-            self.weights[i] += eta * (gradient - regularization); //正則化
+            let update_weight = eta * (gradient - regularization);
+            self.weights[i] += update_weight; //正則化
+            update_norm_square += update_weight.powi(2);
         }
+
+        update_norm_square.sqrt()
+    }
+    pub fn update_from_batch(&mut self, batch: &[GameResult]) {
+        self.update_from_batch_and_get_update_norm(batch);
     }
     fn accumulate_game_gradient(&self, accumulator: &mut Vec<f32>, game: &GameResult) {
         let target = game.score;
@@ -230,6 +239,9 @@ impl AiModel {
             let regularization = LAMBDA * self.weights[idx];
             self.weights[idx] += LEARNING_RATE * (error - regularization);
         });
+    }
+    pub fn weight_norm(&self) -> f32 {
+        self.weights.iter().map(|w| w.powi(2)).sum::<f32>().sqrt()
     }
 }
 

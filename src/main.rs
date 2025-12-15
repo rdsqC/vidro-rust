@@ -113,8 +113,11 @@ fn train_mode(epochs: usize, batch_size: usize) {
         // 自己対局
         let games = generate_self_play_data(RANDOM_MOVES_UNTIL, &ai_ctx, opponent_pool, batch_size);
 
+        let weight_norm = ai_ctx.weight_norm();
+
         //重み更新
-        ai_ctx.update_from_batch(&games);
+        let update_norm = ai_ctx.update_from_batch_and_get_update_norm(&games);
+        println!("Update Ratio: {:.3e}", update_norm / weight_norm);
 
         //最新データの保存
         if let Err(e) = save_model(&ai_ctx, "model_latest.bin") {

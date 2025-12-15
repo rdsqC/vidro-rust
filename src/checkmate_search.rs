@@ -321,7 +321,7 @@ pub fn is_reach(vidro: &mut Bitboard, prev_hash: Option<u64>) -> bool {
 }
 
 pub fn checkmate_in_one_move(vidro: &mut Bitboard, prev_hash: Option<u64>) -> bool {
-    let moves = vidro.generate_legal_move_only_flick(None);
+    let moves = vidro.generate_legal_move_only_flick();
     let turn = vidro.turn;
     for &mv in &moves {
         if vidro
