@@ -151,7 +151,7 @@ use crate::snapshot::BoardSnapshot;
 use crate::snapshot_features::{BitIter, BoardSnapshotFeatures, NUM_FEATURES};
 use rayon::prelude::*;
 
-const LEARNING_RATE: f32 = 1e-4;
+const LEARNING_RATE: f32 = 1e-2;
 const LAMBDA: f32 = 0.001; //正則化係数
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -206,7 +206,7 @@ impl AiModel {
         for i in 0..NUM_FEATURES {
             let gradient = total_gradients[i];
             let regularization = LAMBDA * self.weights[i];
-            let update_weight = eta * (gradient - regularization);
+            let update_weight = eta * gradient - regularization;
             self.weights[i] += update_weight; //正則化
             update_norm_square += update_weight.powi(2);
         }
