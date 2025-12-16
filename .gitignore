@@ -5,3 +5,5 @@ WSL2-Linux-Kernel
 flamegraph.svg
 venv
 tsumi_log*
+model_latest.bin
+models/*
