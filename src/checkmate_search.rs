@@ -1,12 +1,14 @@
+use crate::bitboard::MoveList;
+
 use super::bitboard::{Bitboard, MoveBit};
 use super::eval_value::EvalValue;
 use Vec;
 use std::usize;
 
 pub fn find_mate_in_one_move(vidro: &mut Bitboard, prev_hash: Option<u64>) -> Option<MoveBit> {
-    let moves = vidro.generate_legal_move(); //詰み探索には千日手を除くことはしなくてよい。積んでいる局面になったときに千日手盤面になることはないため
+    let moves = vidro.iter_legal_move(); //詰み探索には千日手を除くことはしなくてよい。積んでいる局面になったときに千日手盤面になることはないため
     let turn = vidro.turn;
-    for &mv in &moves {
+    for mv in moves {
         if vidro
             .apply_force_with_check_illegal_move(mv, prev_hash)
             .is_err()
@@ -122,10 +124,7 @@ fn find_mate_sequence_recursive(
 
     if is_attacker {
         //見つかったときのdepthが大きい物(短く詰ませる)手を探す
-        let attacking_moves = vidro.generate_legal_move();
-        if attacking_moves.is_empty() {
-            return None;
-        }
+        let attacking_moves = vidro.iter_legal_move();
 
         let mut max_depth_found = usize::MIN; //最終的な詰みの深さ
         let mut best_move: Option<MoveBit> = None;
@@ -159,7 +158,7 @@ fn find_mate_sequence_recursive(
     } else {
         //見つかったときのdepthが小さい物(長く詰まされる)手を探す
         //特に効率の良い守る手を見つける方法はないため合法手から絞り込むことにする
-        let defending_moves = vidro.generate_legal_move();
+        let defending_moves = vidro.iter_legal_move();
         //合法手が一つもないということは起きないため空の場合は考えない
         // if defending_moves.is_empty() {
         // return Some(depth + 1);
@@ -232,10 +231,7 @@ fn find_mate_recursive(
 
     let hash = vidro.to_compression_bod();
 
-    let attacking_moves = generate_threat_moves(vidro, prev_hash);
-    if attacking_moves.is_empty() {
-        return false; //詰めろを掛けられない
-    }
+    let attacking_moves = vidro.iter_legal_move();
 
     //OR探索
     for mv in attacking_moves {
@@ -282,11 +278,7 @@ fn check_opponent_defense(
 
     let hash = vidro.to_compression_bod();
 
-    let defending_moves = vidro.generate_legal_move();
-    if defending_moves.is_empty() {
-        //受けなし
-        return true;
-    }
+    let defending_moves = vidro.iter_legal_move();
 
     // 生成した受け手の全ての応手に対して、詰み手順が続くか調べる (AND検索)
     for mv in defending_moves {
@@ -321,9 +313,9 @@ pub fn is_reach(vidro: &mut Bitboard, prev_hash: Option<u64>) -> bool {
 }
 
 pub fn checkmate_in_one_move(vidro: &mut Bitboard, prev_hash: Option<u64>) -> bool {
-    let moves = vidro.generate_legal_move_only_flick();
+    let moves = vidro.iter_legal_flick_move();
     let turn = vidro.turn;
-    for &mv in &moves {
+    for mv in moves {
         if vidro
             .apply_force_with_check_illegal_move(mv, prev_hash)
             .is_err()
@@ -341,10 +333,12 @@ pub fn checkmate_in_one_move(vidro: &mut Bitboard, prev_hash: Option<u64>) -> bo
     false
 }
 
-pub fn generate_threat_moves(vidro: &mut Bitboard, prev_hash: Option<u64>) -> Vec<MoveBit> {
-    let mut moves = vidro.generate_legal_move();
+pub fn generate_threat_moves(vidro: &mut Bitboard, prev_hash: Option<u64>) -> MoveList {
+    let mut moves = MoveList::new();
+    vidro.generate_legal_moves(&mut moves);
+
     let hash = vidro.to_compression_bod();
-    moves.retain(|&mv| {
+    moves.retain(|&mut mv| {
         if vidro
             .apply_force_with_check_illegal_move(mv, prev_hash)
             .is_err()

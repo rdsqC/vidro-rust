@@ -25,7 +25,8 @@ use std::io::Write;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 
-use crate::eval::AiModel;
+use crate::bitboard::MoveList;
+use crate::eval::{AiModel, sigmoid};
 use crate::self_match::generate_self_play_data;
 use crate::snapshot::BoardSnapshot;
 use crate::snapshot_features::{BoardSnapshotFeatures, FEATURE_LINES, NUM_FEATURES};
@@ -155,6 +156,8 @@ fn train_mode(epochs: usize, batch_size: usize) {
     println!("学習完了");
 }
 
+const EVAL_VALUE_MALTIPLIER: f32 = 100.0;
+
 fn play_mode(depth: usize, human_turn: i8) {
     let load_path = "model_latest.bin";
 
@@ -170,7 +173,7 @@ fn play_mode(depth: usize, human_turn: i8) {
 
     let evaluate = |snapshot: &BoardSnapshot| {
         let z = ai_ctx.eval_score(snapshot.iter_feature_indices());
-        ((z * 40.0) as i16).clamp(-29000, 29000)
+        ((z * EVAL_VALUE_MALTIPLIER) as i16).clamp(-29000, 29000)
     };
 
     let tt = Arc::new(Mutex::new(LruCache::new(
@@ -212,17 +215,18 @@ fn play_mode(depth: usize, human_turn: i8) {
             let mut best_move: MoveBit;
             if move_count < RANDOM_MOVES_UNTIL {
                 println!("----ランダムループを選択----");
-                let legal_moves = vidro.generate_legal_move();
-                if legal_moves.is_empty() {
+                let mut moves = MoveList::new();
+                vidro.generate_legal_moves(&mut moves);
+                if moves.is_empty() {
                     break;
                 }
-                best_move = (*legal_moves.choose(&mut rand::rng()).unwrap()).clone();
+                best_move = (*moves.choose(&mut rand::rng()).unwrap()).clone();
             } else {
                 let is_turn_humen = vidro.turn == human_turn * 2 - 1;
                 if is_turn_humen {
                     println!("手を選択");
                     let legal_moves = vidro
-                        .generate_legal_move()
+                        .iter_legal_move()
                         .into_iter()
                         .filter(move |&mv| !vidro.check_illegal_move(mv, prev_hash))
                         .collect();
@@ -249,7 +253,12 @@ fn play_mode(depth: usize, human_turn: i8) {
                             break;
                         }
                     };
-                    println!("\nmtd-f 決定手: {} 評価値{}", best_move.to_string(), score);
+                    println!(
+                        "\nmtd-f 決定手: {} 評価値{} 勝率: {}",
+                        best_move.to_string(),
+                        score,
+                        sigmoid(score as f32 / EVAL_VALUE_MALTIPLIER)
+                    );
                 }
             }
             println!("\n決定手: {}", best_move.to_string());

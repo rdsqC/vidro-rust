@@ -36,7 +36,9 @@ fn evaluate_position(vidro: &Bitboard) -> i16 {
             players_bod[p] &= players_bod[p] - 1;
         }
     }
-    score += (vidro.can_set_count(0) as i16 - vidro.can_set_count(1) as i16) * 10;
+    score += (vidro.can_set_count_with_turn_idx(0) as i16
+        - vidro.can_set_count_with_turn_idx(1) as i16)
+        * 10;
     score
 }
 
@@ -122,9 +124,9 @@ fn evaluate_threats(vidro: &Bitboard) -> i16 {
 
 fn evaluate_reach(vidro: &mut Bitboard, prev_hash: Option<u64>) -> i16 {
     vidro.turn_change(); //意図的に手番を書き換え2手差しさせたときに勝利することがあるかを調べる
-    let moves = vidro.generate_legal_move();
+    let moves = vidro.iter_legal_move();
     let turn = vidro.turn;
-    for &mv in &moves {
+    for mv in moves {
         match vidro.apply_force_with_check_illegal_move(mv, prev_hash) {
             Ok(()) => {
                 if let EvalValue::Win(value) = vidro.win_eval().value {
@@ -149,8 +151,8 @@ use crate::snapshot::BoardSnapshot;
 use crate::snapshot_features::{BitIter, BoardSnapshotFeatures, NUM_FEATURES};
 use rayon::prelude::*;
 
-const LEARNING_RATE: f32 = 1e-3;
-const LAMBDA: f32 = 0.0001; //正則化係数
+const LEARNING_RATE: f32 = 1e-4;
+const LAMBDA: f32 = 0.001; //正則化係数
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AiModel {

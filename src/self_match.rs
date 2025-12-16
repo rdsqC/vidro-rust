@@ -1,8 +1,7 @@
-use core::{f32, hash};
-use std::{collections::HashSet, thread::current};
+use std::collections::HashSet;
 
 use crate::{
-    bitboard::{Bitboard, MoveBit},
+    bitboard::{Bitboard, MoveBit, MoveList},
     bitboard_console::print_u64,
     eval::{AiModel, GameResult},
     eval_value,
@@ -98,10 +97,8 @@ fn select_move_softmax(
     prev_hash: Option<u64>,
 ) -> Option<MoveBit> {
     let hash = board.to_compression_bod();
-    let legal_moves = board.generate_legal_move();
-    if legal_moves.is_empty() {
-        return None;
-    }
+    let mut legal_moves = MoveList::new();
+    board.generate_legal_moves(&mut legal_moves);
 
     let scores: Vec<f32> = legal_moves
         .iter()
@@ -138,6 +135,8 @@ fn select_move_softmax(
     Some(legal_moves[dist.sample(&mut rng)])
 }
 
+const MAX_SCORE_ABS: f32 = 30000.0;
+
 fn search(
     board: &mut Bitboard,
     ai_model: &AiModel,
@@ -147,7 +146,7 @@ fn search(
     prev_hash: Option<u64>,
 ) -> f32 {
     if board.game_over() {
-        return 30000.0 * board.win_turn() as f32 * board.turn as f32;
+        return MAX_SCORE_ABS * board.win_turn() as f32 * board.turn as f32;
     }
     if depth == 0 {
         let score = ai_model.eval_score(board.to_snapshot(prev_hash).iter_feature_indices())
@@ -155,10 +154,11 @@ fn search(
         return score;
     }
 
-    let moves = board.generate_legal_move();
+    let mut moves = MoveList::new();
+    board.generate_legal_moves(&mut moves);
+
     if moves.is_empty() {
-        return ai_model.eval_score(board.to_snapshot(prev_hash).iter_feature_indices())
-            * board.turn as f32;
+        return -MAX_SCORE_ABS;
     }
 
     let mut max_score = f32::NEG_INFINITY;

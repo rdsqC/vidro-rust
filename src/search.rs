@@ -1,4 +1,4 @@
-use crate::bitboard::{Bitboard, MoveBit};
+use crate::bitboard::{Bitboard, MoveBit, MoveList};
 use crate::bitboard_console::BitboardConsole;
 use crate::checkmate_search::{find_mate, find_mate_in_one_move, find_mate_sequence};
 use crate::eval::static_evaluation;
@@ -132,7 +132,9 @@ where
         }
     }
 
-    let mut moves = board.generate_legal_move();
+    let mut moves = MoveList::new();
+    board.generate_legal_moves(&mut moves);
+
     if let Some(tt_move) = best_move_from_tt {
         if let Some(pos) = moves.iter().position(|m| *m == tt_move) {
             let m = moves.remove(pos);

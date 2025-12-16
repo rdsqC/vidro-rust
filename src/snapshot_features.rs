@@ -2,7 +2,6 @@ use crate::bitboard::{BITBOD_WIDTH, FIELD_BOD, FIELD_BOD_WIDTH};
 use crate::random_state_generator::random_state_generator;
 use crate::snapshot::BoardSnapshot;
 use std::arch::x86_64::{_pdep_u64, _pext_u64};
-use std::process::Output;
 
 macro_rules! build_features {
     ($snapshot: expr, [  $($feature_type:ty),* ]) => {
@@ -104,7 +103,13 @@ fn test() {
 const NUM_VALID_SQUARES: usize = FIELD_BOD.count_ones() as usize;
 
 #[derive(Clone, Copy)]
-pub struct BitIter(u64);
+pub struct BitIter(pub u64);
+
+impl BitIter {
+    pub fn new(init_value: u64) -> Self {
+        Self(init_value)
+    }
+}
 
 impl Iterator for BitIter {
     type Item = usize;
