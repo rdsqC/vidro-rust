@@ -117,7 +117,7 @@ fn select_move_softmax(
                 f32::NEG_INFINITY,
                 f32::INFINITY,
                 Some(hash),
-            ); //常に先手の勝率を予測しているため反転させる
+            );
             z
         })
         .collect();
@@ -149,8 +149,7 @@ fn search(
         return MAX_SCORE_ABS * board.win_turn() as f32 * board.turn as f32;
     }
     if depth == 0 {
-        let score = ai_model.eval_score(board.to_snapshot(prev_hash).iter_feature_indices())
-            * board.turn as f32;
+        let score = ai_model.eval_score(board.to_snapshot(prev_hash).iter_feature_indices());
         return score;
     }
 

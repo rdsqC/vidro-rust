@@ -72,7 +72,7 @@ fn main() {
 }
 
 fn train_mode(epochs: usize, batch_size: usize) {
-    const RANDOM_MOVES_UNTIL: usize = 5;
+    const RANDOM_MOVES_UNTIL: usize = 2;
 
     println!("NUM_FEATURES: {}", NUM_FEATURES);
 
@@ -200,6 +200,14 @@ fn play_mode(depth: usize, human_turn: i8) {
         loop {
             println!("\n--------------------------------");
             println!("{}", vidro.to_string());
+
+            let relative = vidro.to_snapshot(prev_hash).to_relative();
+            print_u64("relative white", relative.p1);
+            print_u64("relative black", relative.p2);
+            println!(
+                "white have: {}\nblack have: {}",
+                relative.p1_hand_piece, relative.p2_hand_piece
+            );
 
             {
                 let win_eval_result = vidro.win_eval();

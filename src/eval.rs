@@ -152,7 +152,7 @@ use crate::snapshot_features::{BitIter, BoardSnapshotFeatures, NUM_FEATURES};
 use rayon::prelude::*;
 
 const LEARNING_RATE: f32 = 1e-2;
-const LAMBDA: f32 = 0.001; //正則化係数
+const LAMBDA: f32 = 0.01; //正則化係数
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AiModel {
@@ -206,7 +206,7 @@ impl AiModel {
         for i in 0..NUM_FEATURES {
             let gradient = total_gradients[i];
             let regularization = LAMBDA * self.weights[i];
-            let update_weight = eta * gradient - regularization;
+            let update_weight = eta * gradient - LEARNING_RATE * regularization;
             self.weights[i] += update_weight; //正則化
             update_norm_square += update_weight.powi(2);
         }
@@ -217,10 +217,22 @@ impl AiModel {
         self.update_from_batch_and_get_update_norm(batch);
     }
     fn accumulate_game_gradient(&self, accumulator: &mut Vec<f32>, game: &GameResult) {
-        let target = game.score;
+        //先手からみた試合の勝敗
+        let game_score = game.score;
+
         for snapshot in game.history.iter() {
             let z: f32 = self.eval_score(snapshot.iter_feature_indices());
             let p = sigmoid(z);
+
+            //turn
+            let is_white_turn = snapshot.turn == 1;
+
+            let target = if is_white_turn {
+                game_score
+            } else {
+                1.0 - game_score
+            };
+
             //誤差
             let error = target - p;
 

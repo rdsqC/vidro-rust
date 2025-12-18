@@ -91,7 +91,7 @@ where
         route.pop();
         let tsumi_result = find_mate_sequence(board, 1, prev_hash);
 
-        let static_score = evaluate(&board.to_snapshot(prev_hash)) * board.turn as i16;
+        let static_score = evaluate(&board.to_snapshot(prev_hash));
         //詰み探索を実行
         let tsumi_found = if tsumi_result.is_some() { 1 } else { 0 };
 

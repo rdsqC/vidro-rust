@@ -36,7 +36,7 @@ macro_rules! count_total_features {
 trait FeatureGroup {
     const LEN: usize;
 
-    fn get_iter(snapshot: &BoardSnapshot, offset_set: usize) -> impl Iterator<Item = usize>;
+    fn get_iter(snapshot: BoardSnapshot, offset_set: usize) -> impl Iterator<Item = usize>;
 }
 
 macro_rules! define_ai_model {
@@ -48,7 +48,8 @@ macro_rules! define_ai_model {
 
         impl BoardSnapshotFeatures for $snapshot_type {
             fn iter_feature_indices(&self) -> impl Iterator<Item = usize> + '_ {
-                return build_features!(self, [$($feature),*]);
+                let relative_snapshot = self.to_relative();
+                return build_features!(relative_snapshot, [$($feature),*]);
             }
         }
     };
@@ -62,7 +63,7 @@ macro_rules! run_feature_tests {
             board.print_data();
             $(
                 let def_len: usize = <$feature_type as FeatureGroup>::LEN;
-                let count: usize = <$feature_type as FeatureGroup>::get_iter(&snapshot, 0).max().unwrap_or(0);
+                let count: usize = <$feature_type as FeatureGroup>::get_iter(snapshot, 0).max().unwrap_or(0);
 
                 assert!(count <= def_len, "Feature length {} has is {}. But there are featrue which has {} offset", stringify!($features_type), def_len, count);
             )*
@@ -74,7 +75,6 @@ define_ai_model!(
     target: BoardSnapshot,
     features: [
         LineFeatures,
-        BiasFeatures,
         HandPieceFeatures,
         PrevPPFeatures,
         PrevLineFeatures,
@@ -90,7 +90,6 @@ fn test() {
 
     run_feature_tests!(
         LineFeatures,
-        BiasFeatures,
         HandPieceFeatures,
         PrevPPFeatures,
         PrevLineFeatures,
@@ -375,7 +374,7 @@ struct PPFeatures;
 
 impl FeatureGroup for PPFeatures {
     const LEN: usize = combination(25, 2) * 2usize.pow(2);
-    fn get_iter(snapshot: &BoardSnapshot, offset_set: usize) -> impl Iterator<Item = usize> {
+    fn get_iter(snapshot: BoardSnapshot, offset_set: usize) -> impl Iterator<Item = usize> {
         let p1_packed = unsafe { _pext_u64(snapshot.p1, FIELD_BOD) };
         let p2_packed = unsafe { _pext_u64(snapshot.p2, FIELD_BOD) };
 
@@ -405,7 +404,7 @@ struct PPPFeature;
 
 impl FeatureGroup for PPPFeature {
     const LEN: usize = combination(25, 3) * 2usize.pow(3);
-    fn get_iter(snapshot: &BoardSnapshot, offset_set: usize) -> impl Iterator<Item = usize> {
+    fn get_iter(snapshot: BoardSnapshot, offset_set: usize) -> impl Iterator<Item = usize> {
         let p1_packed = unsafe { _pext_u64(snapshot.p1, FIELD_BOD) };
         let p2_packed = unsafe { _pext_u64(snapshot.p2, FIELD_BOD) };
 
@@ -437,7 +436,7 @@ struct LineFeatures;
 
 impl FeatureGroup for LineFeatures {
     const LEN: usize = 3348;
-    fn get_iter(snapshot: &BoardSnapshot, offset_set: usize) -> impl Iterator<Item = usize> {
+    fn get_iter(snapshot: BoardSnapshot, offset_set: usize) -> impl Iterator<Item = usize> {
         FEATURE_LINES.iter().map(move |line_config| {
             let white_line: u64 = unsafe { _pext_u64(snapshot.p1, line_config.mask) };
             let black_line: u64 = unsafe { _pext_u64(snapshot.p2, line_config.mask) };
@@ -451,7 +450,7 @@ struct BiasFeatures;
 
 impl FeatureGroup for BiasFeatures {
     const LEN: usize = 1;
-    fn get_iter(_: &BoardSnapshot, offset_set: usize) -> impl Iterator<Item = usize> {
+    fn get_iter(_: BoardSnapshot, offset_set: usize) -> impl Iterator<Item = usize> {
         Some(offset_set).into_iter()
     }
 }
@@ -461,7 +460,7 @@ struct TurnFeatures;
 
 impl FeatureGroup for TurnFeatures {
     const LEN: usize = 1;
-    fn get_iter(snapshot: &BoardSnapshot, offset_set: usize) -> impl Iterator<Item = usize> {
+    fn get_iter(snapshot: BoardSnapshot, offset_set: usize) -> impl Iterator<Item = usize> {
         if snapshot.turn == 1 {
             Some(offset_set).into_iter()
         } else {
@@ -475,7 +474,7 @@ struct HandPieceFeatures;
 
 impl FeatureGroup for HandPieceFeatures {
     const LEN: usize = 12;
-    fn get_iter(snapshot: &BoardSnapshot, offset_set: usize) -> impl Iterator<Item = usize> {
+    fn get_iter(snapshot: BoardSnapshot, offset_set: usize) -> impl Iterator<Item = usize> {
         [
             offset_set + snapshot.p1_hand_piece as usize,
             offset_set + snapshot.p2_hand_piece as usize + 6,
@@ -489,7 +488,7 @@ struct PrevPPFeatures;
 
 impl FeatureGroup for PrevPPFeatures {
     const LEN: usize = (25 + 1) * 25 / 2;
-    fn get_iter(snapshot: &BoardSnapshot, offset_set: usize) -> impl Iterator<Item = usize> {
+    fn get_iter(snapshot: BoardSnapshot, offset_set: usize) -> impl Iterator<Item = usize> {
         snapshot.prev_hash.into_iter().flat_map(move |hash| {
             let p1_iter = BitIter(snapshot.prev_hash.unwrap() >> (NUM_VALID_SQUARES + 1));
             let p2_iter =
@@ -514,7 +513,7 @@ struct PrevLineFeatures;
 
 impl FeatureGroup for PrevLineFeatures {
     const LEN: usize = 3348;
-    fn get_iter(snapshot: &BoardSnapshot, offset_set: usize) -> impl Iterator<Item = usize> {
+    fn get_iter(snapshot: BoardSnapshot, offset_set: usize) -> impl Iterator<Item = usize> {
         snapshot.prev_hash.into_iter().flat_map(move |hash| {
             let p1 = snapshot.prev_hash.unwrap() >> (NUM_VALID_SQUARES + 1);
             let p2 = ((1 << NUM_VALID_SQUARES) - 1) & (snapshot.prev_hash.unwrap() >> 1);
@@ -532,7 +531,7 @@ struct PrevHandPieceFeatures;
 
 impl FeatureGroup for PrevHandPieceFeatures {
     const LEN: usize = 12;
-    fn get_iter(snapshot: &BoardSnapshot, offset_set: usize) -> impl Iterator<Item = usize> {
+    fn get_iter(snapshot: BoardSnapshot, offset_set: usize) -> impl Iterator<Item = usize> {
         snapshot.prev_hash.into_iter().flat_map(move |hash| {
             [
                 offset_set + hash.count_ones() as usize,
