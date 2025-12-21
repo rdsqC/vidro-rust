@@ -256,7 +256,7 @@ fn play_mode(depth: usize, human_turn: i8) {
 
                     let tt_for_thread = Arc::clone(&tt);
 
-                    // tt.lock().unwrap().clear();
+                    tt.lock().unwrap().clear();
 
                     let score;
                     (score, best_move) = {
