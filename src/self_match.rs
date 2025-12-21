@@ -2,9 +2,7 @@ use std::collections::HashSet;
 
 use crate::{
     bitboard::{Bitboard, MoveBit, MoveList},
-    bitboard_console::print_u64,
     eval::{AiModel, GameResult},
-    eval_value,
     random_state_generator::random_state_generator,
     snapshot::BoardSnapshot,
     snapshot_features::BoardSnapshotFeatures,

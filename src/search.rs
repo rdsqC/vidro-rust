@@ -1,15 +1,12 @@
 use crate::bitboard::{Bitboard, MoveBit, MoveList};
-use crate::bitboard_console::BitboardConsole;
-use crate::checkmate_search::{find_mate, find_mate_in_one_move, find_mate_sequence};
+use crate::checkmate_search::find_mate_sequence;
 use crate::eval::{sigmoid, static_evaluation};
-use crate::eval_value::{Eval, EvalValue};
 use crate::snapshot::BoardSnapshot;
 use Vec;
 use lru::LruCache;
-use std::fs::{File, OpenOptions, metadata};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const USE_CACHE: bool = true;
 

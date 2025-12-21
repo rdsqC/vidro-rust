@@ -1,7 +1,7 @@
 use crate::bitboard::{BITBOD_WIDTH, FIELD_BOD, FIELD_BOD_WIDTH};
 use crate::random_state_generator::random_state_generator;
 use crate::snapshot::BoardSnapshot;
-use std::arch::x86_64::{_pdep_u64, _pext_u64};
+use std::arch::x86_64::_pext_u64;
 
 macro_rules! build_features {
     ($snapshot: expr, [  $($feature_type:ty),* ]) => {

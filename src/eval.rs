@@ -1,9 +1,8 @@
-use rand::{Rng, distr::Uniform};
 use serde::{Deserialize, Serialize};
 
-use super::bitboard::{Bitboard, FIELD_BOD, FIELD_BOD_HEIGHT, FIELD_BOD_WIDTH, MoveBit};
+use super::bitboard::{Bitboard, FIELD_BOD, FIELD_BOD_WIDTH};
 use super::checkmate_search::generate_threat_moves;
-use super::eval_value::{Eval, EvalValue};
+use super::eval_value::EvalValue;
 
 pub fn static_evaluation(vidro: &mut Bitboard, prev_hash: Option<u64>) -> i16 {
     let threats = evaluate_threats(&vidro);

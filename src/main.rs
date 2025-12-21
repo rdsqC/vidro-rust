@@ -12,16 +12,14 @@ mod util;
 
 mod snapshot_features;
 use bitboard::{Bitboard, MoveBit};
-use bitboard_console::{BitboardConsole, print_u64};
-use eval_value::{Eval, EvalValue};
+use bitboard_console::BitboardConsole;
+use eval_value::EvalValue;
 
 use clap::{Parser, Subcommand};
 use lru::LruCache;
 use pre_train::pre_train_with_manual_eval;
 use rand::seq::IndexedRandom;
 use search::mtd_f;
-use std::fs::{File, OpenOptions, metadata};
-use std::io::Write;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 
@@ -30,7 +28,7 @@ use crate::eval::{AiModel, sigmoid};
 use crate::search::EVAL_VALUE_MALTIPLIER;
 use crate::self_match::generate_self_play_data;
 use crate::snapshot::BoardSnapshot;
-use crate::snapshot_features::{BoardSnapshotFeatures, FEATURE_LINES, NUM_FEATURES};
+use crate::snapshot_features::{BoardSnapshotFeatures, NUM_FEATURES};
 use crate::util::{load_model, save_model};
 
 #[derive(Parser)]
