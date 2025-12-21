@@ -47,6 +47,28 @@ pub struct TTEntry {
     best_move: MoveBit, // その局面で見つかった最善手
 }
 
+const MIN_MATE_SCORE: i16 = WIN_LOSE_SCORE - 1000;
+
+fn score_to_tt(score: i16, ply: usize) -> i16 {
+    if score > MIN_MATE_SCORE {
+        score + ply as i16
+    } else if score < -MIN_MATE_SCORE {
+        score - ply as i16
+    } else {
+        score
+    }
+}
+
+fn score_from_tt(score: i16, ply: usize) -> i16 {
+    if score > MIN_MATE_SCORE {
+        score - ply as i16
+    } else if score < -MIN_MATE_SCORE {
+        score + ply as i16
+    } else {
+        score
+    }
+}
+
 pub fn alphabeta<F>(
     board: &mut Bitboard,
     depth: usize,
@@ -59,6 +81,7 @@ pub fn alphabeta<F>(
     shared_info: Arc<Mutex<SearchInfo>>, // ★情報共有のための構造体
     prev_hash: Option<u64>,
     evaluate: &F,
+    ply: usize,
 ) -> (i16, Vec<MoveBit>)
 where
     F: Fn(&BoardSnapshot) -> i16 + Sync,
@@ -74,18 +97,13 @@ where
     route.push(hash);
 
     //自己評価
-    let terminal_eval = board.win_eval();
-    if terminal_eval.evaluated {
+    if board.game_over() {
         route.pop();
-        let score = if let EvalValue::Win(winner) = terminal_eval.value {
-            if winner as i8 == board.turn {
-                WIN_LOSE_SCORE
-            } else {
-                -WIN_LOSE_SCORE
-            }
-        } else {
-            DRAW_SCORE
-        };
+
+        let win_sign = board.win_turn() * board.turn as i16;
+        let abs_socre = WIN_LOSE_SCORE - ply as i16;
+
+        let score = win_sign * abs_socre;
         return (score, Vec::new());
     }
 
@@ -105,29 +123,32 @@ where
         if let Some(mate_sequence) = tsumi_result {
             // board.print_data();
             // 詰みを発見！スコアを「勝ち」に格上げし、手順も返す
-            let mate_score = WIN_LOSE_SCORE - mate_sequence.len() as i16;
+            let mate_score = WIN_LOSE_SCORE - (mate_sequence.len() + ply) as i16;
             return (mate_score, mate_sequence);
         }
         return (static_score, best_pv);
     }
 
     let original_alpha = alpha;
+    let original_beta = beta;
     let mut best_move_from_tt: Option<MoveBit> = None;
     //置換表参照
     if USE_CACHE {
         if let Some(entry) = tt.get(&hash) {
             if entry.depth as usize >= depth {
+                let tt_score = score_from_tt(entry.score, ply);
+
                 match entry.flag {
                     TTFlag::Exact => {
                         route.pop();
-                        return (entry.score, vec![entry.best_move]);
+                        return (tt_score, vec![entry.best_move]);
                     }
-                    TTFlag::LowerBound => alpha = alpha.max(entry.score),
-                    TTFlag::UpperBound => beta = beta.min(entry.score),
+                    TTFlag::LowerBound => alpha = alpha.max(tt_score),
+                    TTFlag::UpperBound => beta = beta.min(tt_score),
                 }
                 if alpha >= beta {
                     route.pop();
-                    return (entry.score, vec![entry.best_move]);
+                    return (tt_score, vec![entry.best_move]);
                 }
             }
             best_move_from_tt = Some(entry.best_move);
@@ -168,6 +189,7 @@ where
             shared_info.clone(),
             Some(hash),
             evaluate,
+            ply + 1,
         );
         score = -score;
         board.undo_force(mv); //Bitboardに戻す
@@ -196,14 +218,17 @@ where
         if let Some(mv) = best_move {
             let flag = if best_score <= original_alpha {
                 TTFlag::UpperBound
-            } else if best_score >= beta {
+            } else if best_score >= original_beta {
                 TTFlag::LowerBound
             } else {
                 TTFlag::Exact
             };
+
+            let tt_socre_to_save = score_to_tt(best_score, ply);
+
             let new_entry = TTEntry {
                 best_move: mv,
-                score: best_score,
+                score: tt_socre_to_save,
                 depth: depth as u8,
                 flag,
             };
@@ -266,6 +291,7 @@ where
                         shared_info.clone(),
                         prev_hash,
                         evaluate,
+                        0,
                     );
                     if g < beta {
                         upper_bound = g;
@@ -349,6 +375,7 @@ where
                     shared_info.clone(),
                     prev_hash,
                     evaluate,
+                    0,
                 );
                 result_score = score;
 
