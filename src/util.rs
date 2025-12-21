@@ -10,7 +10,7 @@ pub fn save_model(model: &AiModel, file_path: &str) -> std::io::Result<()> {
     bincode::serialize_into(writer, model)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
-    println!("Saved model: {}", file_path);
+    // println!("Saved model: {}", file_path);
     Ok(())
 }
 

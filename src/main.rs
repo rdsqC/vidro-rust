@@ -144,7 +144,7 @@ fn train_mode(epochs: usize, batch_size: usize) {
         }
 
         //ログ出力
-        if epoch % 10 == 0 {
+        if epoch % 1 == 0 {
             let win_rate = games.iter().map(|g| g.score).sum::<f32>() / batch_size as f32;
             let ave_moves =
                 games.iter().map(|g| g.history.len() as f32).sum::<f32>() / games.len() as f32;
