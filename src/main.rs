@@ -72,7 +72,7 @@ fn main() {
 }
 
 fn train_mode(epochs: usize, batch_size: usize) {
-    const RANDOM_MOVES_UNTIL: usize = 2;
+    const RANDOM_MOVES_UNTIL: usize = 5;
 
     println!("NUM_FEATURES: {}", NUM_FEATURES);
 
