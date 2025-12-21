@@ -179,7 +179,7 @@ impl Bitboard {
         }
     }
     pub fn set_force(&mut self, mv: MoveBit) {
-        let turn_player = ((-self.turn + 1) / 2) as usize;
+        let turn_player = self.get_turn_idx();
         let target_bit = 1u64 << mv.idx;
         debug_assert!(
             (1u64 << mv.idx | (self.player_bods[0] | self.player_bods[1]))
@@ -323,6 +323,10 @@ impl Bitboard {
         false
     }
     pub fn bod_legal_set_moves_with_turn_idx(&self, turn_idx: usize) -> u64 {
+        if 0 == self.have_piece[turn_idx] {
+            return 0u64;
+        }
+
         let mut set_bod = self.player_bods[turn_idx];
 
         //上下スライド, そのあとの左右スライドで3*3の範囲のbodに加工
