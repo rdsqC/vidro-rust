@@ -202,8 +202,8 @@ fn play_mode(depth: usize, human_turn: i8) {
             println!("{}", vidro.to_string());
 
             let relative = vidro.to_snapshot(prev_hash).to_relative();
-            print_u64("relative white", relative.p1);
-            print_u64("relative black", relative.p2);
+            // print_u64("relative white", relative.p1);
+            // print_u64("relative black", relative.p2);
             println!(
                 "white have: {}\nblack have: {}",
                 relative.p1_hand_piece, relative.p2_hand_piece
