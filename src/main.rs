@@ -27,6 +27,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::bitboard::MoveList;
 use crate::eval::{AiModel, sigmoid};
+use crate::search::EVAL_VALUE_MALTIPLIER;
 use crate::self_match::generate_self_play_data;
 use crate::snapshot::BoardSnapshot;
 use crate::snapshot_features::{BoardSnapshotFeatures, FEATURE_LINES, NUM_FEATURES};
@@ -164,8 +165,6 @@ fn train_mode(epochs: usize, batch_size: usize) {
 
     println!("学習完了");
 }
-
-const EVAL_VALUE_MALTIPLIER: f32 = 100.0;
 
 fn play_mode(depth: usize, human_turn: i8) {
     let load_path = "model_latest.bin";

@@ -1,7 +1,7 @@
 use crate::bitboard::{Bitboard, MoveBit, MoveList};
 use crate::bitboard_console::BitboardConsole;
 use crate::checkmate_search::{find_mate, find_mate_in_one_move, find_mate_sequence};
-use crate::eval::static_evaluation;
+use crate::eval::{sigmoid, static_evaluation};
 use crate::eval_value::{Eval, EvalValue};
 use crate::snapshot::BoardSnapshot;
 use Vec;
@@ -15,6 +15,8 @@ const USE_CACHE: bool = true;
 
 const DRAW_SCORE: i16 = 0;
 const WIN_LOSE_SCORE: i16 = 30000;
+
+pub const EVAL_VALUE_MALTIPLIER: f32 = 100.0;
 
 fn evaluate_for_negamax(board: &mut Bitboard, prev_hash: Option<u64>) -> i16 {
     // eval_mon(board, prev_move)
@@ -282,9 +284,10 @@ where
             {
                 let info = info_clone_for_ui.lock().unwrap();
                 print!(
-                    "\rDepth: {:2}, Score: {:6}, Nodes: {:8}, PV: {:<50}",
+                    "\rDepth: {:2}, Score: {:6}, WinRate: {:.3}, Nodes: {:8}, PV: {:<50}",
                     info.depth,
                     info.score,
+                    sigmoid(info.score as f32 / EVAL_VALUE_MALTIPLIER),
                     info.nodes,
                     info.pv
                         .iter()
