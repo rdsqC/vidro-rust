@@ -16,7 +16,7 @@ const USE_CACHE: bool = true;
 const DRAW_SCORE: i16 = 0;
 const WIN_LOSE_SCORE: i16 = 30000;
 
-pub const EVAL_VALUE_MALTIPLIER: f32 = 1000.0;
+pub const EVAL_VALUE_MALTIPLIER: f32 = 100.0;
 
 fn evaluate_for_negamax(board: &mut Bitboard, prev_hash: Option<u64>) -> i16 {
     // eval_mon(board, prev_move)
@@ -233,7 +233,7 @@ where
                     reduction = 2;
                 }
 
-                if i >= 30 {
+                if i >= 25 {
                     reduction = 3;
                 }
 
