@@ -1,22 +1,22 @@
-use rand::{Rng, distr::Uniform};
+use serde::{Deserialize, Serialize};
 
-use super::bitboard::{Bitboard, FIELD_BOD, FIELD_BOD_HEIGHT, FIELD_BOD_WIDTH, MoveBit};
+use super::bitboard::{Bitboard, FIELD_BOD, FIELD_BOD_WIDTH};
 use super::checkmate_search::generate_threat_moves;
-use super::eval_value::{Eval, EvalValue};
+use super::eval_value::EvalValue;
 
-pub fn static_evaluation(vidro: &mut Bitboard, prev_move: Option<MoveBit>) -> i16 {
+pub fn static_evaluation(vidro: &mut Bitboard, prev_hash: Option<u64>) -> i16 {
     let threats = evaluate_threats(&vidro);
     let have_piece = evaluate_have_piece(&vidro);
     let position = evaluate_position(&vidro);
-    let reach = evaluate_reach(vidro, prev_move);
+    let reach = evaluate_reach(vidro, prev_hash);
 
     // 自分の「詰めろ」になる手の数が多いほど、局面は有利
-    let my_threats = generate_threat_moves(vidro, prev_move).len() as i16;
+    let my_threats = generate_threat_moves(vidro, prev_hash).len() as i16;
     let threat_score = my_threats * 25; // 例：1つの脅威手を25点と評価
 
     // 相手の脅威の数も計算し、評価値から引くとなお良い
     vidro.turn_change();
-    let opponent_threats = generate_threat_moves(vidro, prev_move).len() as i16;
+    let opponent_threats = generate_threat_moves(vidro, prev_hash).len() as i16;
     let opponent_threat_score = opponent_threats * 150;
     vidro.turn_change(); // ★手番を必ず元に戻す
 
@@ -35,7 +35,9 @@ fn evaluate_position(vidro: &Bitboard) -> i16 {
             players_bod[p] &= players_bod[p] - 1;
         }
     }
-    score += (vidro.can_set_count(0) as i16 - vidro.can_set_count(1) as i16) * 10;
+    score += (vidro.can_set_count_with_turn_idx(0) as i16
+        - vidro.can_set_count_with_turn_idx(1) as i16)
+        * 10;
     score
 }
 
@@ -119,20 +121,26 @@ fn evaluate_threats(vidro: &Bitboard) -> i16 {
     total_score
 }
 
-fn evaluate_reach(vidro: &mut Bitboard, prev_move: Option<MoveBit>) -> i16 {
+fn evaluate_reach(vidro: &mut Bitboard, prev_hash: Option<u64>) -> i16 {
     vidro.turn_change(); //意図的に手番を書き換え2手差しさせたときに勝利することがあるかを調べる
-    let moves = vidro.generate_legal_move(prev_move);
+    let moves = vidro.iter_legal_move();
     let turn = vidro.turn;
-    for &mv in &moves {
-        vidro.apply_force(mv);
-        if let EvalValue::Win(value) = vidro.win_eval().value {
-            if value as i8 == turn {
+    for mv in moves {
+        match vidro.apply_force_with_check_illegal_move(mv, prev_hash) {
+            Ok(()) => {
+                if let EvalValue::Win(value) = vidro.win_eval().value {
+                    if value as i8 == turn {
+                        vidro.undo_force(mv);
+                        vidro.turn_change();
+                        return value as i16
+                            * (10 - vidro.have_piece[0] - vidro.have_piece[1]) as i16
+                            * 15;
+                    }
+                }
                 vidro.undo_force(mv);
-                vidro.turn_change();
-                return value as i16 * (10 - vidro.have_piece[0] - vidro.have_piece[1]) as i16 * 15;
             }
+            Err(()) => {}
         }
-        vidro.undo_force(mv);
     }
     vidro.turn_change();
     return 0;
@@ -142,16 +150,18 @@ use crate::snapshot::BoardSnapshot;
 use crate::snapshot_features::{BitIter, BoardSnapshotFeatures, NUM_FEATURES};
 use rayon::prelude::*;
 
-const LEARNING_RATE: f32 = 0.1;
-const LAMBDA: f32 = 0.0001; //正則化係数
+const LEARNING_RATE: f32 = 1e-5;
+const LAMBDA: f32 = 0.01; //正則化係数
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AiModel {
-    weights: Vec<f32>,
+    pub weights: Vec<f32>,
 }
 
+#[derive(Debug)]
 pub struct GameResult {
-    history: Vec<BoardSnapshot>,
-    score: f32, // 1.0: 先手勝ち, 0.0 先手負け
+    pub history: Vec<BoardSnapshot>,
+    pub score: f32, // 1.0: 先手勝ち, 0.0 先手負け
 }
 
 impl AiModel {
@@ -162,13 +172,13 @@ impl AiModel {
                 .collect::<Vec<f32>>(),
         }
     }
-    fn eval_score(&self, features_iter: impl Iterator<Item = usize>) -> f32 {
+    pub fn eval_score(&self, features_iter: impl Iterator<Item = usize>) -> f32 {
         features_iter.map(|n| self.weights[n]).sum()
     }
-    fn eval_score_from_vec(&self, features: &[usize]) -> f32 {
+    pub fn eval_score_from_vec(&self, features: &[usize]) -> f32 {
         features.iter().map(|&n| self.weights[n]).sum()
     }
-    pub fn update_from_batch(&mut self, batch: &[GameResult]) {
+    pub fn update_from_batch_and_get_update_norm(&mut self, batch: &[GameResult]) -> f32 {
         let batch_size = batch.len() as f32;
         let total_gradients: Vec<f32> = batch
             .par_iter()
@@ -189,18 +199,39 @@ impl AiModel {
                 },
             );
 
+        let mut update_norm_square: f32 = 0.0;
+
         let eta = LEARNING_RATE / batch_size;
         for i in 0..NUM_FEATURES {
             let gradient = total_gradients[i];
             let regularization = LAMBDA * self.weights[i];
-            self.weights[i] += eta * (gradient - regularization); //正則化
+            let update_weight = eta * gradient - LEARNING_RATE * regularization;
+            self.weights[i] += update_weight; //正則化
+            update_norm_square += update_weight.powi(2);
         }
+
+        update_norm_square.sqrt()
+    }
+    pub fn update_from_batch(&mut self, batch: &[GameResult]) {
+        self.update_from_batch_and_get_update_norm(batch);
     }
     fn accumulate_game_gradient(&self, accumulator: &mut Vec<f32>, game: &GameResult) {
-        let target = game.score;
+        //先手からみた試合の勝敗
+        let game_score = game.score;
+
         for snapshot in game.history.iter() {
             let z: f32 = self.eval_score(snapshot.iter_feature_indices());
             let p = sigmoid(z);
+
+            //turn
+            let is_white_turn = snapshot.turn == 1;
+
+            let target = if is_white_turn {
+                game_score
+            } else {
+                1.0 - game_score
+            };
+
             //誤差
             let error = target - p;
 
@@ -210,8 +241,23 @@ impl AiModel {
                 .for_each(|idx| accumulator[idx] += error);
         }
     }
+    pub fn update_from_snapshot(&mut self, snapshot: BoardSnapshot, target: f32) {
+        let z: f32 = self.eval_score(snapshot.iter_feature_indices());
+        let p = sigmoid(z);
+        //誤差
+        let error = target - p;
+
+        //勾配加算
+        snapshot.iter_feature_indices().for_each(|idx| {
+            let regularization = LAMBDA * self.weights[idx];
+            self.weights[idx] += LEARNING_RATE * (error - regularization);
+        });
+    }
+    pub fn weight_norm(&self) -> f32 {
+        self.weights.iter().map(|w| w.powi(2)).sum::<f32>().sqrt()
+    }
 }
 
-fn sigmoid(x: f32) -> f32 {
+pub fn sigmoid(x: f32) -> f32 {
     1.0 / (1.0 + (-x).exp())
 }

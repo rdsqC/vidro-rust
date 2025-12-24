@@ -1,19 +1,22 @@
+use arrayvec::ArrayVec;
+
 use crate::{
     eval_value::{Eval, EvalValue},
     snapshot::BoardSnapshot,
+    snapshot_features::BitIter,
 };
 
 #[derive(Debug, Clone, Copy)]
 pub struct Bitboard {
     pub player_bods: [u64; 2],
     pub have_piece: [u8; 2],
-    pub turn: i8,
+    pub turn: i8, // 1が先手, -1が後手
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct MoveBit {
-    idx: u8,
-    angle_idx: u8, //8以上のときはset
+    pub idx: u8,
+    pub angle_idx: u8, //8以上のときはset
 }
 
 impl MoveBit {
@@ -48,7 +51,13 @@ impl MoveBit {
     pub fn from_idx(idx: u8, angle_idx: u8) -> Self {
         Self { idx, angle_idx }
     }
+    pub fn field_idx(&self) -> usize {
+        self.idx as usize / BITBOD_WIDTH as usize * FIELD_BOD_WIDTH as usize
+            + self.idx as usize % BITBOD_WIDTH as usize
+    }
 }
+
+pub type MoveList = ArrayVec<MoveBit, 64>;
 
 pub const BITBOD_WIDTH: u64 = 9;
 pub const FIELD_BOD_WIDTH: u64 = 5;
@@ -121,7 +130,41 @@ impl Bitboard {
     pub fn turn_change(&mut self) {
         self.turn = -self.turn;
     }
-    pub fn apply_force(&mut self, mv: MoveBit) {
+
+    #[inline(always)]
+    pub fn get_turn_idx(&self) -> usize {
+        ((-self.turn + 1) / 2) as usize
+    }
+
+    //千日手の場合はtrue, そうでない手をfalseと返す
+    pub fn check_illegal_move(&mut self, mv: MoveBit, prev_hash: Option<u64>) -> bool {
+        self.apply_force(mv);
+        let is_illegal = prev_hash.is_some_and(|prev| self.to_compression_bod() == prev);
+        self.undo_force(mv);
+        is_illegal
+    }
+    pub fn apply_force_with_check_illegal_move(
+        &mut self,
+        mv: MoveBit,
+        prev_hash: Option<u64>,
+    ) -> Result<(), ()> {
+        self.apply_force(mv);
+        if prev_hash.is_some_and(|prev| self.to_compression_bod() == prev) {
+            self.undo_force(mv);
+            Err(())
+        } else {
+            Ok(())
+        }
+    }
+    pub fn apply_and(&mut self, mv: MoveBit, prev_hash: Option<u64>, f: impl Fn(&mut Self) -> ()) {
+        self.apply_force(mv);
+        if prev_hash.is_some_and(|prev| self.to_compression_bod() == prev) {
+            self.undo_force(mv);
+        } else {
+            f(self);
+        }
+    }
+    fn apply_force(&mut self, mv: MoveBit) {
         if mv.angle_idx < 8 {
             self.flick_force(mv);
         } else {
@@ -136,7 +179,7 @@ impl Bitboard {
         }
     }
     pub fn set_force(&mut self, mv: MoveBit) {
-        let turn_player = ((-self.turn + 1) / 2) as usize;
+        let turn_player = self.get_turn_idx();
         let target_bit = 1u64 << mv.idx;
         debug_assert!(
             (1u64 << mv.idx | (self.player_bods[0] | self.player_bods[1]))
@@ -279,19 +322,65 @@ impl Bitboard {
         }
         false
     }
-    pub fn can_set_count(&self, turn_player: usize) -> u32 {
-        //setの合法手を集める
-        let mut can_set_bod = self.player_bods[turn_player];
-        let can_set_bod_copy = self.player_bods[turn_player];
-        for angle in ANGLE {
-            can_set_bod |= can_set_bod_copy << angle;
-            can_set_bod |= can_set_bod_copy >> angle;
+    pub fn bod_legal_set_moves_with_turn_idx(&self, turn_idx: usize) -> u64 {
+        if 0 == self.have_piece[turn_idx] {
+            return 0u64;
         }
-        can_set_bod = !can_set_bod; //反転して欲しいものにする
-        can_set_bod &= !self.player_bods[1 - turn_player];
-        can_set_bod &= FIELD_BOD;
 
-        can_set_bod.count_ones()
+        let mut set_bod = self.player_bods[turn_idx];
+
+        //上下スライド, そのあとの左右スライドで3*3の範囲のbodに加工
+        set_bod |= set_bod << 1 | set_bod >> 1;
+        set_bod |= set_bod << BITBOD_WIDTH | set_bod >> BITBOD_WIDTH;
+
+        //相手と自分の駒とその周囲8マスを覗いたfieldのマス
+        set_bod = !(set_bod | self.player_bods[1 - turn_idx]) & FIELD_BOD;
+
+        set_bod
+    }
+    //千日手除外の処理は探索に任せる
+    pub fn bod_legal_flick_moves_with_turn_idx(&self, turn_idx: usize) -> [u64; 8] {
+        let mut flick_bod: [u64; 8] = [0; 8];
+        let all_piece = self.player_bods[0] | self.player_bods[1];
+        let blank = FIELD_BOD & !all_piece;
+        let p_bod = self.player_bods[turn_idx];
+
+        for i in 0..ANGLE.iter().len() {
+            let mut bod1 = 0;
+            let mut bod2 = 0;
+            for step in 1..4 {
+                bod1 |= blank >> ANGLE[i] * step;
+                bod2 |= blank << ANGLE[i] * step;
+            }
+
+            bod1 &= p_bod;
+            bod2 &= p_bod;
+
+            flick_bod[i] = bod1;
+            flick_bod[i + 4] = bod2;
+        }
+
+        flick_bod
+    }
+    pub fn bod_legal_set_moves(&self) -> u64 {
+        self.bod_legal_set_moves_with_turn_idx(self.get_turn_idx())
+    }
+    pub fn bod_legal_flick_moves(&self) -> [u64; 8] {
+        self.bod_legal_flick_moves_with_turn_idx(self.get_turn_idx())
+    }
+    pub fn bod_blankplace_win(&self, turn_idx: usize) -> u64 {
+        let p_bod = self.player_bods[turn_idx];
+        let mut result = 0u64;
+        for angle in ANGLE {
+            result |= p_bod << angle & p_bod >> angle;
+        }
+        result &= !(self.player_bods[0] | self.player_bods[1]);
+        result
+    }
+    pub fn can_set_count_with_turn_idx(&self, turn_player: usize) -> u32 {
+        //setの合法手を集める
+        self.bod_legal_set_moves_with_turn_idx(turn_player)
+            .count_ones()
     }
     pub fn win_turn(&self) -> i16 {
         let mut result = [0i16; 2];
@@ -424,284 +513,48 @@ impl Bitboard {
             "target_bit is protrude beyand piece_bod"
         );
     }
-    pub fn generate_legal_move(&self, prev_move: Option<MoveBit>) -> Vec<MoveBit> {
-        let mut result = Vec::new();
-        let turn_player = ((-self.turn + 1) / 2) as usize;
+    pub fn iter_legal_move(&self) -> impl Iterator<Item = MoveBit> + use<> {
+        let turn_idx = self.get_turn_idx();
 
-        if self.have_piece[turn_player] > 0 {
-            //setの合法手を集める
-            let mut can_set_bod = self.player_bods[turn_player];
-            let can_set_bod_copy = self.player_bods[turn_player];
-            for angle in ANGLE {
-                can_set_bod |= can_set_bod_copy << angle;
-                can_set_bod |= can_set_bod_copy >> angle;
-            }
-            can_set_bod = !can_set_bod; //反転して欲しいものにする
-            can_set_bod &= !self.player_bods[1 - turn_player];
-            can_set_bod &= FIELD_BOD;
-
-            while can_set_bod != 0 {
-                let idx = can_set_bod.trailing_zeros();
-                result.push(MoveBit::from_idx(idx as u8, 8));
-                can_set_bod &= can_set_bod - 1;
-            }
-        }
-        //flickの合法手を集める
-        let (prev, is_root) = if let Some(mv) = prev_move {
-            (mv, false)
-        } else {
-            (MoveBit::new(0, 0, 0), true)
-        };
-        let prev_angle = ANGLE[prev.angle_idx as usize % 4] as u8;
-        let blank: u64 = FIELD_BOD & !(self.player_bods[0] | self.player_bods[1]); //空白マス
-        let is_prev_left_direction = prev.angle_idx < 4;
-        for angle_idx in 0..ANGLE.len() as u8 {
-            let angle = ANGLE[angle_idx as usize];
-
-            let is_there_gap1 = {
-                let mut result = 0u64;
-                for i in 1..5 {
-                    result |= blank >> angle * i;
-                }
-                result
-            };
-            let is_there_gap2 = {
-                let mut result = 0u64;
-                for i in 1..5 {
-                    result |= blank.wrapping_shl(angle as u32 * i);
-                }
-                result
-            };
-
-            let mut can_flick_bod1 = self.player_bods[turn_player] & is_there_gap1;
-            let mut can_flick_bod2 = self.player_bods[turn_player] & is_there_gap2;
-
-            while can_flick_bod1 != 0 {
-                let idx = can_flick_bod1.trailing_zeros() as u8;
-
-                let is_repetition_of_moves = {
-                    let difference_of_idx = idx.abs_diff(prev.idx);
-                    !is_prev_left_direction
-                        && prev.angle_idx % 4 == angle_idx
-                        && difference_of_idx % prev_angle == 0
-                        && difference_of_idx / prev_angle <= 5
-                        && !is_root
-                };
-                if !is_repetition_of_moves {
-                    result.push(MoveBit::from_idx(idx, angle_idx));
-                }
-                can_flick_bod1 &= can_flick_bod1 - 1;
-            }
-
-            while can_flick_bod2 != 0 {
-                let idx = can_flick_bod2.trailing_zeros() as u8;
-
-                let is_repetition_of_moves = {
-                    let difference_of_idx = idx.abs_diff(prev.idx);
-                    is_prev_left_direction
-                        && prev.angle_idx % 4 == angle_idx
-                        && difference_of_idx % prev_angle == 0
-                        && difference_of_idx / prev_angle <= 5
-                        && !is_root
-                };
-                if !is_repetition_of_moves {
-                    result.push(MoveBit::from_idx(idx, angle_idx + 4));
-                }
-                can_flick_bod2 &= can_flick_bod2 - 1;
-            }
-        }
-
-        result
+        self.iter_legal_set_move_with_turn_idx(turn_idx)
+            .chain(self.iter_legal_flick_move_with_turn_idx(turn_idx))
     }
-    pub fn generate_legal_move_only_flick(&self, prev_move: Option<MoveBit>) -> Vec<MoveBit> {
-        let mut result = Vec::new();
-        let turn_player = ((-self.turn + 1) / 2) as usize;
-
-        //flickの合法手を集める
-        let (prev, is_root) = if let Some(mv) = prev_move {
-            (mv, false)
-        } else {
-            (MoveBit::new(0, 0, 0), true)
-        };
-        let prev_angle = ANGLE[prev.angle_idx as usize % 4] as u8;
-        let blank: u64 = FIELD_BOD & !(self.player_bods[0] | self.player_bods[1]); //空白マス
-        let is_prev_left_direction = prev.angle_idx < 4;
-        for angle_idx in 0..ANGLE.len() as u8 {
-            let angle = ANGLE[angle_idx as usize];
-
-            let is_there_gap1 = {
-                let mut result = 0u64;
-                for i in 1..5 {
-                    result |= blank >> angle * i;
-                }
-                result
-            };
-            let is_there_gap2 = {
-                let mut result = 0u64;
-                for i in 1..5 {
-                    result |= blank.wrapping_shl(angle as u32 * i);
-                }
-                result
-            };
-
-            let mut can_flick_bod1 = self.player_bods[turn_player] & is_there_gap1;
-            let mut can_flick_bod2 = self.player_bods[turn_player] & is_there_gap2;
-
-            while can_flick_bod1 != 0 {
-                let idx = can_flick_bod1.trailing_zeros() as u8;
-
-                let is_repetition_of_moves = {
-                    let difference_of_idx = idx.abs_diff(prev.idx);
-                    !is_prev_left_direction
-                        && prev.angle_idx % 4 == angle_idx
-                        && difference_of_idx % prev_angle == 0
-                        && difference_of_idx / prev_angle <= 5
-                        && !is_root
-                };
-                if !is_repetition_of_moves {
-                    result.push(MoveBit::from_idx(idx, angle_idx));
-                }
-                can_flick_bod1 &= can_flick_bod1 - 1;
-            }
-
-            while can_flick_bod2 != 0 {
-                let idx = can_flick_bod2.trailing_zeros() as u8;
-
-                let is_repetition_of_moves = {
-                    let difference_of_idx = idx.abs_diff(prev.idx);
-                    is_prev_left_direction
-                        && prev.angle_idx % 4 == angle_idx
-                        && difference_of_idx % prev_angle == 0
-                        && difference_of_idx / prev_angle <= 5
-                        && !is_root
-                };
-                if !is_repetition_of_moves {
-                    result.push(MoveBit::from_idx(idx, angle_idx + 4));
-                }
-                can_flick_bod2 &= can_flick_bod2 - 1;
-            }
-        }
-
-        result
+    pub fn iter_legal_set_move_with_turn_idx(
+        &self,
+        turn_idx: usize,
+    ) -> impl Iterator<Item = MoveBit> + use<> {
+        BitIter::new(self.bod_legal_set_moves_with_turn_idx(turn_idx)).map(move |idx| MoveBit {
+            idx: idx as u8,
+            angle_idx: 8,
+        })
     }
-    pub fn generate_reach_bod(&self, player: usize) -> u64 {
-        let piece_bod = self.player_bods[0] | self.player_bods[1];
-        let turn_player_bod = self.player_bods[player];
-        let mut result = 0u64;
-
-        for angle in ANGLE {
-            result |= (turn_player_bod << angle) & (turn_player_bod >> angle); //o_o を検知
-            let oo = (turn_player_bod >> angle) & (turn_player_bod >> angle * 2);
-            result |= oo; //_oo を検知
-            result |= oo.wrapping_shl(angle as u32 * 3); //oo_ を検知
-        }
-
-        result &= !piece_bod;
-        result &= FIELD_BOD;
-        result
+    pub fn iter_legal_flick_move_with_turn_idx(
+        &self,
+        turn_idx: usize,
+    ) -> impl Iterator<Item = MoveBit> + use<> {
+        let bods = self.bod_legal_flick_moves_with_turn_idx(turn_idx);
+        bods.into_iter()
+            .enumerate()
+            .flat_map(move |(angle_idx, bod)| {
+                BitIter(bod).map(move |idx| MoveBit {
+                    idx: idx as u8,
+                    angle_idx: angle_idx as u8,
+                })
+            })
     }
-    pub fn generate_maybe_threat_bod(&self, player: usize) -> u64 {
-        let reach_bod = self.generate_reach_bod(player);
-        let mut result = reach_bod;
-        let piece_bod = self.player_bods[0] | self.player_bods[1];
-        let blank: u64 = FIELD_BOD & !piece_bod; //空白マス
-        for angle in ANGLE {
-            let mut mut_reach_bod = reach_bod;
-            mut_reach_bod &= !(blank >> angle);
-            for _ in 1..5 {
-                mut_reach_bod >>= angle;
-                result |= mut_reach_bod;
-            }
-            let mut mut_reach_bod = reach_bod;
-            mut_reach_bod &= !(blank << angle);
-            for _ in 1..5 {
-                mut_reach_bod = mut_reach_bod.wrapping_shl(angle as u32);
-                result |= mut_reach_bod;
-            }
-        }
-        result &= FIELD_BOD;
-        result
+    pub fn iter_legal_set_move(&self) -> impl Iterator<Item = MoveBit> + use<> {
+        self.iter_legal_set_move_with_turn_idx(self.get_turn_idx())
     }
-    pub fn generate_maybe_threat_moves(&self, prev_move: Option<MoveBit>) -> Vec<MoveBit> {
-        let mut result = Vec::new();
-        let turn_player = ((-self.turn + 1) / 2) as usize;
-        let threat_bod = self.generate_maybe_threat_bod(turn_player);
-        if self.have_piece[turn_player] > 0 {
-            //setの合法手を集める
-            let mut can_set_bod = self.player_bods[turn_player];
-            let can_set_bod_copy = self.player_bods[turn_player];
-            for angle in ANGLE {
-                can_set_bod |= can_set_bod_copy << angle;
-                can_set_bod |= can_set_bod_copy >> angle;
-            }
-            can_set_bod = !can_set_bod; //反転して欲しいものにする
-            can_set_bod &= !self.player_bods[1 - turn_player];
-            can_set_bod &= FIELD_BOD;
-
-            can_set_bod &= threat_bod; //脅威のみ
-
-            while can_set_bod != 0 {
-                let idx = can_set_bod.trailing_zeros();
-                result.push(MoveBit::from_idx(idx as u8, 8));
-                can_set_bod &= can_set_bod - 1;
-            }
-        }
-        //flickの合法手を集める
-        let (prev, is_root) = if let Some(mv) = prev_move {
-            (mv, false)
-        } else {
-            (MoveBit::new(0, 0, 0), true)
-        };
-        let prev_angle = ANGLE[prev.angle_idx as usize % 4] as u8;
-        let blank: u64 = FIELD_BOD & !(self.player_bods[0] | self.player_bods[1]); //空白マス
-        let is_prev_left_direction = prev.angle_idx < 4;
-        for angle_idx in 0..ANGLE.len() as u8 {
-            let angle = ANGLE[angle_idx as usize];
-
-            let mut can_flick_bod1 = self.player_bods[turn_player] & (blank >> angle);
-            let mut can_flick_bod2 = self.player_bods[turn_player] & (blank << angle);
-
-            while can_flick_bod1 != 0 {
-                let idx = can_flick_bod1.trailing_zeros() as u8;
-
-                let is_repetition_of_moves = {
-                    let difference_of_idx = idx.abs_diff(prev.idx);
-                    !is_prev_left_direction
-                        && prev.angle_idx % 4 == angle_idx
-                        && difference_of_idx % prev_angle == 0
-                        && difference_of_idx / prev_angle <= 5
-                        && !is_root
-                };
-                if !is_repetition_of_moves {
-                    result.push(MoveBit::from_idx(idx, angle_idx));
-                }
-                can_flick_bod1 &= can_flick_bod1 - 1;
-            }
-
-            while can_flick_bod2 != 0 {
-                let idx = can_flick_bod2.trailing_zeros() as u8;
-
-                let is_repetition_of_moves = {
-                    let difference_of_idx = idx.abs_diff(prev.idx);
-                    is_prev_left_direction
-                        && prev.angle_idx % 4 == angle_idx
-                        && difference_of_idx % prev_angle == 0
-                        && difference_of_idx / prev_angle <= 5
-                        && !is_root
-                };
-                if !is_repetition_of_moves {
-                    result.push(MoveBit::from_idx(idx, angle_idx + 4));
-                }
-                can_flick_bod2 &= can_flick_bod2 - 1;
-            }
-        }
-
-        result
+    pub fn iter_legal_flick_move(&self) -> impl Iterator<Item = MoveBit> + use<> {
+        self.iter_legal_flick_move_with_turn_idx(self.get_turn_idx())
+    }
+    pub fn generate_legal_moves(&self, out: &mut MoveList) {
+        out.extend(self.iter_legal_move());
     }
     pub fn to_compression_bod(&self) -> u64 {
         use std::arch::x86_64::_pext_u64;
         let mut result = 0u64;
-        let turn_player = ((-self.turn + 1) / 2) as usize;
+        let turn_player = self.get_turn_idx();
         unsafe {
             result |= _pext_u64(self.player_bods[0], FIELD_BOD)
                 << (FIELD_BOD_WIDTH * FIELD_BOD_HEIGHT + 1);
@@ -711,13 +564,14 @@ impl Bitboard {
         // println!("{:0>64b}", result);
         result
     }
-    pub fn to_snapshot(&self) -> BoardSnapshot {
+    pub fn to_snapshot(&self, prev_hash: Option<u64>) -> BoardSnapshot {
         BoardSnapshot {
             p1: self.player_bods[0],
-            p2: self.player_bods[0],
+            p2: self.player_bods[1],
             turn: self.turn,
             p1_hand_piece: self.have_piece[0],
             p2_hand_piece: self.have_piece[1],
+            prev_hash,
         }
     }
 }

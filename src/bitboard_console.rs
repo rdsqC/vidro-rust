@@ -231,3 +231,23 @@ impl BitboardConsole for Bitboard {
         println!("{}", buf);
     }
 }
+
+pub fn print_u64(title: &str, n: u64) -> () {
+    let mut buf = String::new();
+    buf += title;
+    buf += ":\n";
+    for c in 0..FIELD_BOD_HEIGHT {
+        buf += &c.to_string();
+
+        for r in 0..BITBOD_WIDTH {
+            buf += if (n >> (c * BITBOD_WIDTH + r)) & 0b1 == 0 {
+                r"  "
+            } else {
+                r" ●"
+            };
+        }
+        buf += "\n";
+    }
+    buf += &format!("binaly: {}", format_with_underscores(n));
+    println!("{}", buf);
+}
