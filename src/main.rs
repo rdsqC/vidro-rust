@@ -25,7 +25,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::bitboard::MoveList;
 use crate::eval::{AiModel, sigmoid};
-use crate::search::EVAL_VALUE_MALTIPLIER;
+use crate::search::{EVAL_VALUE_MALTIPLIER, find_best_move};
 use crate::self_match::generate_self_play_data;
 use crate::snapshot::BoardSnapshot;
 use crate::snapshot_features::{BoardSnapshotFeatures, NUM_FEATURES};
@@ -71,7 +71,7 @@ fn main() {
 }
 
 fn train_mode(epochs: usize, batch_size: usize) {
-    const RANDOM_MOVES_UNTIL: usize = 4;
+    const RANDOM_MOVES_UNTIL: usize = 2;
 
     println!("NUM_FEATURES: {}", NUM_FEATURES);
 
@@ -259,7 +259,7 @@ fn play_mode(depth: usize, human_turn: i8) {
                     let score;
                     (score, best_move) = {
                         let result =
-                            mtd_f(&mut vidro, 0, depth, tt_for_thread, prev_hash, &evaluate);
+                            find_best_move(&mut vidro, depth, tt_for_thread, prev_hash, &evaluate);
                         if result.1.is_some() {
                             (result.0, result.1.unwrap())
                         } else {

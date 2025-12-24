@@ -1,19 +1,22 @@
 use crate::bitboard::{Bitboard, MoveBit, MoveList};
-use crate::checkmate_search::find_mate_sequence;
+use crate::checkmate_search::{checkmate_in_one_move, find_mate_sequence};
 use crate::eval::{sigmoid, static_evaluation};
+use crate::search;
 use crate::snapshot::BoardSnapshot;
 use Vec;
+use arrayvec::ArrayVec;
 use lru::LruCache;
+use std::ptr::null;
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::time::Duration;
+use std::{i16, i32, thread};
 
 const USE_CACHE: bool = true;
 
 const DRAW_SCORE: i16 = 0;
 const WIN_LOSE_SCORE: i16 = 30000;
 
-pub const EVAL_VALUE_MALTIPLIER: f32 = 100.0;
+pub const EVAL_VALUE_MALTIPLIER: f32 = 1000.0;
 
 fn evaluate_for_negamax(board: &mut Bitboard, prev_hash: Option<u64>) -> i16 {
     // eval_mon(board, prev_move)
@@ -65,6 +68,8 @@ fn score_from_tt(score: i16, ply: usize) -> i16 {
         score
     }
 }
+
+const STATIC_EVAL_SORTING_DEPTH: usize = 2;
 
 pub fn alphabeta<F>(
     board: &mut Bitboard,
@@ -155,17 +160,41 @@ where
     let mut moves = MoveList::new();
     board.generate_legal_moves(&mut moves);
 
-    if let Some(tt_move) = best_move_from_tt {
-        if let Some(pos) = moves.iter().position(|m| *m == tt_move) {
-            let m = moves.remove(pos);
-            moves.insert(0, m);
+    let is_sort = is_root || depth >= STATIC_EVAL_SORTING_DEPTH;
+
+    if is_sort {
+        moves.sort_by_cached_key(|&mv| {
+            let move_score: i16;
+            if Some(mv) == best_move_from_tt {
+                move_score = i16::MAX;
+            } else {
+                match board.apply_force_with_check_illegal_move(mv, prev_hash) {
+                    Ok(()) => {
+                        move_score = -evaluate(&board.to_snapshot(Some(hash)));
+                        board.undo_force(mv);
+                    }
+                    Err(()) => {
+                        move_score = i16::MIN;
+                    }
+                }
+            }
+
+            //降順にするため反転
+            -move_score
+        });
+    } else {
+        if let Some(tt_move) = best_move_from_tt {
+            if let Some(pos) = moves.iter().position(|m| *m == tt_move) {
+                let m = moves.remove(pos);
+                moves.insert(0, m);
+            }
         }
     }
 
     let mut best_score = i16::MIN;
     let mut best_move: Option<MoveBit> = None;
 
-    for &mv in &moves {
+    for (i, &mv) in moves.iter().enumerate() {
         //手を実行
         if board
             .apply_force_with_check_illegal_move(mv, prev_hash)
@@ -173,30 +202,108 @@ where
         {
             continue;
         }
-        //その手ができた場合
-        let (mut score, mut child_pv) = alphabeta(
-            board,
-            depth - 1,
-            -beta,
-            -alpha,
-            tt,
-            route,
-            // process,
-            false,
-            shared_info.clone(),
-            Some(hash),
-            evaluate,
-            ply + 1,
-        );
-        score = -score;
+
+        let score;
+        let can_lmr = depth >= 3 && i >= 4 && !is_root && !checkmate_in_one_move(board, Some(hash));
+
+        let mut child_pv;
+        if i == 0 || !is_sort {
+            //その手ができた場合
+            let (s, pv) = alphabeta(
+                board,
+                depth - 1,
+                -beta,
+                -alpha,
+                tt,
+                route,
+                // process,
+                false,
+                shared_info.clone(),
+                Some(hash),
+                evaluate,
+                ply + 1,
+            );
+            score = -s;
+            child_pv = pv;
+        } else {
+            let mut reduction = 0;
+            if can_lmr {
+                reduction = 1;
+                if i >= 10 {
+                    reduction = 2;
+                }
+
+                if i >= 30 {
+                    reduction = 3;
+                }
+
+                //残り深さが0にならないようにする
+                if depth <= 1 + reduction {
+                    reduction = depth - 2;
+                }
+            }
+
+            let (s, _) = alphabeta(
+                board,
+                depth - 1 - reduction,
+                -alpha - 1,
+                -alpha,
+                tt,
+                route,
+                false,
+                shared_info.clone(),
+                Some(hash),
+                evaluate,
+                ply + 1,
+            );
+            let mut temp_score = -s;
+
+            if temp_score > alpha && reduction > 0 {
+                let (s, _) = alphabeta(
+                    board,
+                    depth - 1,
+                    -alpha - 1,
+                    -alpha,
+                    tt,
+                    route,
+                    false,
+                    shared_info.clone(),
+                    Some(hash),
+                    evaluate,
+                    ply + 1,
+                );
+                temp_score = -s;
+            }
+
+            if temp_score > alpha && temp_score < beta {
+                let (s, pv) = alphabeta(
+                    board,
+                    depth - 1,
+                    -beta,
+                    -alpha,
+                    tt,
+                    route,
+                    // process,
+                    false,
+                    shared_info.clone(),
+                    Some(hash),
+                    evaluate,
+                    ply + 1,
+                );
+                score = -s;
+                child_pv = pv;
+            } else {
+                score = temp_score;
+                child_pv = Vec::new();
+            }
+        }
         board.undo_force(mv); //Bitboardに戻す
         if best_score < score {
             best_score = score;
             best_move = Some(mv);
             best_pv.clear();
             best_pv.push(mv);
-            best_pv.append(&mut child_pv); // 本格的には子ノードのPVも連結する
-
+            best_pv.append(&mut child_pv);
             if is_root {
                 let mut info = shared_info.lock().unwrap();
                 info.score = best_score;
@@ -332,9 +439,9 @@ where
     })
 }
 
-fn find_best_move<F>(
+pub fn find_best_move<F>(
     board: &mut Bitboard,
-    max_depth: usize,
+    depth: usize,
     tt: Arc<Mutex<LruCache<u64, TTEntry>>>,
     prev_hash: Option<u64>,
     evaluate: &F,
@@ -349,54 +456,59 @@ where
     let mut vidro_for_search = board.clone();
 
     std::thread::scope(|s| {
-        let search_thread = s.spawn(move || {
-            let mut tt_guard = tt_for_thread.lock().unwrap();
+        let builder = std::thread::Builder::new()
+            .name("search_thread".into())
+            .stack_size(32 * 1024 * 1024);
+        let search_thread = builder
+            .spawn_scoped(s, move || {
+                let mut tt_guard = tt_for_thread.lock().unwrap();
 
-            let mut best_move_overall: Option<MoveBit> = None;
-            let mut result_score = 0;
+                let mut best_move_overall: Option<MoveBit> = None;
+                let mut result_score = 0;
 
-            //反復深化ループ
-            for depth_run in 0..=max_depth {
-                let mut route = Vec::new();
+                //反復深化ループ
+                for depth_run in 0..=depth {
+                    let mut route = Vec::new();
 
-                //ルートノードで探索
-                let (score, pv_sequence) = alphabeta(
-                    &mut vidro_for_search,
-                    depth_run,
-                    i16::MIN + 1,
-                    i16::MAX,
-                    &mut tt_guard,
-                    &mut route,
-                    // &mut process,
-                    true,
-                    shared_info.clone(),
-                    prev_hash,
-                    evaluate,
-                    0,
-                );
-                result_score = score;
+                    //ルートノードで探索
+                    let (score, pv_sequence) = alphabeta(
+                        &mut vidro_for_search,
+                        depth_run,
+                        i16::MIN + depth as i16,
+                        i16::MAX - depth as i16,
+                        &mut tt_guard,
+                        &mut route,
+                        // &mut process,
+                        true,
+                        shared_info.clone(),
+                        prev_hash,
+                        evaluate,
+                        0,
+                    );
+                    result_score = score;
 
-                //結果をUIに通知
-                {
-                    let mut info = shared_info.lock().unwrap();
-                    info.score = score;
-                    info.depth = depth_run;
-                    info.pv = pv_sequence.clone();
+                    //結果をUIに通知
+                    {
+                        let mut info = shared_info.lock().unwrap();
+                        info.score = score;
+                        info.depth = depth_run;
+                        info.pv = pv_sequence.clone();
+                    }
+
+                    if !pv_sequence.is_empty() {
+                        best_move_overall = Some(pv_sequence[0].clone());
+                    }
+
+                    if score.abs() >= 29000 {
+                        //詰み発見
+                        break;
+                    }
                 }
 
-                if !pv_sequence.is_empty() {
-                    best_move_overall = Some(pv_sequence[0].clone());
-                }
-
-                if score.abs() >= 29000 {
-                    //詰み発見
-                    break;
-                }
-            }
-
-            //最終的な最善手を返す
-            (result_score, best_move_overall)
-        });
+                //最終的な最善手を返す
+                (result_score, best_move_overall)
+            })
+            .expect("faild start-up search_thread");
 
         println!("探索開始...");
         loop {
@@ -404,9 +516,10 @@ where
             {
                 let info = info_clone_for_ui.lock().unwrap();
                 print!(
-                    "\rDepth: {:2}, Score: {:6}, Nodes: {:8}, PV: {:<50}",
+                    "\rDepth: {:2}, Score: {:6}, WinRate: {:.3}, Nodes: {:8}, PV: {:<50}",
                     info.depth,
                     info.score,
+                    sigmoid(info.score as f32 / EVAL_VALUE_MALTIPLIER),
                     info.nodes,
                     info.pv
                         .iter()

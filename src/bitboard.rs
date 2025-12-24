@@ -57,7 +57,7 @@ impl MoveBit {
     }
 }
 
-pub type MoveList = ArrayVec<MoveBit, 128>;
+pub type MoveList = ArrayVec<MoveBit, 64>;
 
 pub const BITBOD_WIDTH: u64 = 9;
 pub const FIELD_BOD_WIDTH: u64 = 5;
