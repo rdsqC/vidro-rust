@@ -150,8 +150,8 @@ use crate::snapshot::BoardSnapshot;
 use crate::snapshot_features::{BitIter, BoardSnapshotFeatures, NUM_FEATURES};
 use rayon::prelude::*;
 
-const LEARNING_RATE: f32 = 1e-3;
-const LAMBDA: f32 = 0.05; //正則化係数
+const LEARNING_RATE: f32 = 1e-5;
+const LAMBDA: f32 = 0.01; //正則化係数
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AiModel {

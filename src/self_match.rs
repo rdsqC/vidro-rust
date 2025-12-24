@@ -48,7 +48,7 @@ pub fn generate_self_play_data(
 
                 seen_state.insert(state_hash);
 
-                let temp = if turn_count < 5 { 1.5 } else { 0.5 };
+                let temp = if turn_count < 3 { 1.5 } else { 0.5 };
 
                 //ターンに合わせてモデルを切り替え
                 let model_to_use = if turn_count % 2 == 0 {
