@@ -82,7 +82,7 @@ fn find_mate_mode() {
 
     let mut depth = 0;
     loop {
-        let eval = find_mate(&mut board, depth, &mut route, None, -i8::MIN, i8::MAX);
+        let eval = find_mate(&mut board, depth, &mut route, None, -1, 1);
 
         println!("Depth: {}  MateValue: {:?}", depth, eval);
         if let MateValue::Mate(score) = eval {
