@@ -20,12 +20,14 @@ use lru::LruCache;
 use pre_train::pre_train_with_manual_eval;
 use rand::seq::IndexedRandom;
 use search::mtd_f;
+use std::collections::HashSet;
+use std::i8;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 
 use crate::bitboard::MoveList;
 use crate::eval::{AiModel, sigmoid};
-use crate::search::{EVAL_VALUE_MALTIPLIER, find_best_move};
+use crate::search::{EVAL_VALUE_MALTIPLIER, MateValue, find_best_move, find_mate};
 use crate::self_match::generate_self_play_data;
 use crate::snapshot::BoardSnapshot;
 use crate::snapshot_features::{BoardSnapshotFeatures, NUM_FEATURES};
@@ -55,6 +57,7 @@ enum Commands {
         #[arg(short, long, default_value_t = 1)]
         human_turn: i8,
     },
+    FindMate {},
 }
 
 fn main() {
@@ -67,6 +70,27 @@ fn main() {
         &Commands::Play { depth, human_turn } => {
             play_mode(depth, human_turn);
         }
+        &Commands::FindMate {} => {
+            find_mate_mode();
+        }
+    }
+}
+
+fn find_mate_mode() {
+    let mut board = Bitboard::new_initial();
+    let mut route = HashSet::new();
+
+    let mut depth = 0;
+    loop {
+        let eval = find_mate(&mut board, depth, &mut route, None, -i8::MIN, i8::MAX);
+
+        println!("Depth: {}  MateValue: {:?}", depth, eval);
+        if let MateValue::Mate(score) = eval {
+            println!("--------Finish find_mate-------- \n result {score}");
+            return;
+        }
+
+        depth += 1;
     }
 }
 

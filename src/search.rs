@@ -1,4 +1,4 @@
-use crate::bitboard::{Bitboard, MoveBit, MoveList};
+use crate::bitboard::{self, Bitboard, MoveBit, MoveList};
 use crate::checkmate_search::{checkmate_in_one_move, find_mate_sequence};
 use crate::eval::{sigmoid, static_evaluation};
 use crate::search;
@@ -6,6 +6,8 @@ use crate::snapshot::BoardSnapshot;
 use Vec;
 use arrayvec::ArrayVec;
 use lru::LruCache;
+use rayon::collections::hash_map;
+use std::collections::{HashMap, HashSet};
 use std::ptr::null;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -541,4 +543,86 @@ where
         //探索スレッドの終了を待って最善手を取得
         search_thread.join().unwrap()
     })
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum MateValue {
+    Unknown,
+    Mate(i8),
+}
+
+pub fn find_mate(
+    board: &mut Bitboard,
+    depth: usize,
+    route: &mut HashSet<u64>,
+    prev_hash: Option<u64>,
+    mut alpha: i8,
+    beta: i8,
+) -> MateValue {
+    let hash = board.to_compression_bod();
+
+    if route.contains(&hash) {
+        return MateValue::Mate(0);
+    } else {
+    }
+
+    let eval = board.win_turn() as i8;
+    if eval != 0 {
+        return MateValue::Mate(eval * board.turn);
+    }
+
+    if depth == 0 {
+        return MateValue::Unknown;
+    }
+
+    //子ノードを作ることが確定したらrouteに追加
+    route.insert(hash);
+
+    let mut moves: MoveList = MoveList::new();
+    board.generate_legal_moves(&mut moves);
+
+    let mut max_score = -1i8;
+    let mut is_contains_unknown = false;
+    for mv in moves {
+        if !board
+            .apply_force_with_check_illegal_move(mv, prev_hash)
+            .is_err()
+        {
+            let eval = find_mate(board, depth - 1, route, Some(hash), -beta, -alpha);
+            board.undo_force(mv);
+
+            if let MateValue::Mate(s) = eval {
+                let score = -s;
+
+                //最高点数の手を見つけた場合即座に終了
+                if score == 1 {
+                    route.remove(&hash);
+                    return MateValue::Mate(1);
+                }
+
+                if beta <= score {
+                    route.remove(&hash);
+                    return MateValue::Mate(score);
+                }
+
+                if max_score < score {
+                    max_score = score;
+                    if alpha < score {
+                        alpha = score;
+                    }
+                }
+            } else {
+                is_contains_unknown = true;
+            }
+        }
+    }
+
+    route.remove(&hash);
+    if max_score == 1 {
+        MateValue::Mate(1)
+    } else if is_contains_unknown {
+        MateValue::Unknown
+    } else {
+        MateValue::Mate(max_score)
+    }
 }
